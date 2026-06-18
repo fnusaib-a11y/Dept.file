@@ -1,0 +1,157 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Primitive Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    // Validations (Zero-trust blueprints matching types.ts formats securely)
+    function isValidUser(data) {
+      return data.keys().hasAll(['id', 'name', 'phone']) 
+        && data.keys().size() >= 3
+        && data.id is string && data.id.size() <= 128
+        && data.name is string && data.name.size() <= 100
+        && data.phone is string && data.phone.size() <= 20;
+    }
+
+    function isValidPost(data) {
+      return data.keys().hasAll(['id', 'authorId', 'authorName', 'content', 'category', 'isReel'])
+        && data.keys().size() >= 6
+        && data.id is string && data.id.size() <= 128
+        && data.authorId is string && data.authorId.size() <= 128
+        && data.authorName is string && data.authorName.size() <= 100
+        && data.content is string && data.content.size() <= 2000
+        && data.category is string && data.category.size() <= 50
+        && data.isReel is bool;
+    }
+
+    function isValidComment(data) {
+      return data.keys().hasAll(['id', 'postId', 'authorId', 'authorName', 'content'])
+        && data.keys().size() >= 5
+        && data.id is string && data.id.size() <= 128
+        && data.postId is string && data.postId.size() <= 128
+        && data.authorId is string && data.authorId.size() <= 128
+        && data.authorName is string && data.authorName.size() <= 100
+        && data.content is string && data.content.size() <= 1000;
+    }
+
+    function isValidMessage(data) {
+      return data.keys().hasAll(['id', 'chatId', 'senderId', 'receiverId', 'content'])
+        && data.keys().size() >= 5
+        && data.id is string && data.id.size() <= 128
+        && data.chatId is string && data.chatId.size() <= 256
+        && data.senderId is string && data.senderId.size() <= 128
+        && data.receiverId is string && data.receiverId.size() <= 128
+        && data.content is string && data.content.size() <= 2000;
+    }
+
+    function isValidFollow(data) {
+      return data.keys().hasAll(['id', 'followerId', 'followingId'])
+        && data.keys().size() >= 3
+        && data.id is string && data.id.size() <= 256
+        && data.followerId is string && data.followerId.size() <= 128
+        && data.followingId is string && data.followingId.size() <= 128;
+    }
+
+    function isValidReport(data) {
+      return data.keys().hasAll(['id', 'reporterId', 'reportedId', 'reportedName', 'reason'])
+        && data.keys().size() >= 5
+        && data.id is string && data.id.size() <= 128
+        && data.reporterId is string && data.reporterId.size() <= 128
+        && data.reportedId is string && data.reportedId.size() <= 128
+        && data.reportedName is string && data.reportedName.size() <= 100
+        && data.reason is string && data.reason.size() <= 1000;
+    }
+
+    // Collection Level Gates
+
+    // 1. User Profiles
+    match /users/{userId} {
+      allow get: if isSignedIn() && isValidId(userId);
+      allow list: if isSignedIn() && resource.data.id is string;
+      allow create: if isSignedIn() && isValidId(userId) && userId == request.auth.uid && isValidUser(incoming());
+      allow update: if isSignedIn() && isValidId(userId) && userId == request.auth.uid && isValidUser(incoming())
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['name', 'bio', 'avatarUrl', 'coverUrl', 'blockedUsers', 'followersCount', 'followingCount', 'postsCount', 'isVerified', 'isPremium'])
+        );
+      allow delete: if false;
+    }
+
+    // 2. Global Social Posts
+    match /posts/{postId} {
+      allow get: if isSignedIn() && isValidId(postId);
+      allow list: if isSignedIn() && resource.data.authorId is string;
+      allow create: if isSignedIn() && isValidId(postId) && incoming().authorId == request.auth.uid && isValidPost(incoming());
+      allow update: if isSignedIn() && isValidId(postId) && isValidPost(incoming())
+        && (
+          // Option A: Creator edits content
+          (existing().authorId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['content', 'category', 'mediaUrl', 'mediaType']))
+          ||
+          // Option B: Interactive Likes adjustments
+          incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'likedBy'])
+          ||
+          // Option C: commentsCount incrementing
+          incoming().diff(existing()).affectedKeys().hasOnly(['commentsCount'])
+        );
+      allow delete: if isSignedIn() && isValidId(postId) && existing().authorId == request.auth.uid;
+
+      // Posts subcollection: comments
+      match /comments/{commentId} {
+        allow get: if isSignedIn() && isValidId(commentId);
+        allow list: if isSignedIn() && resource.data.authorId is string;
+        allow create: if isSignedIn() && isValidId(commentId) && incoming().authorId == request.auth.uid && isValidComment(incoming());
+        allow update: if isSignedIn() && isValidId(commentId) && existing().authorId == request.auth.uid && isValidComment(incoming())
+          && incoming().diff(existing()).affectedKeys().hasOnly(['content']);
+        allow delete: if isSignedIn() && isValidId(commentId) && existing().authorId == request.auth.uid;
+      }
+    }
+
+    // 3. Messages Exchange
+    match /messages/{messageId} {
+      allow get: if isSignedIn() && isValidId(messageId) && (existing().senderId == request.auth.uid || existing().receiverId == request.auth.uid);
+      allow list: if isSignedIn() && (resource.data.senderId == request.auth.uid || resource.data.receiverId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(messageId) && incoming().senderId == request.auth.uid && isValidMessage(incoming());
+      allow update: if isSignedIn() && isValidId(messageId) && existing().receiverId == request.auth.uid && isValidMessage(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['isRead']);
+      allow delete: if false;
+    }
+
+    // 4. Followers registry
+    match /follows/{followId} {
+      allow get: if isSignedIn() && isValidId(followId);
+      allow list: if isSignedIn() && (resource.data.followerId == request.auth.uid || resource.data.followingId == request.auth.uid);
+      allow create: if isSignedIn() && isValidId(followId) && incoming().followerId == request.auth.uid && isValidFollow(incoming());
+      allow update: if false;
+      allow delete: if isSignedIn() && isValidId(followId) && existing().followerId == request.auth.uid;
+    }
+
+    // 5. User Reports
+    match /reports/{reportId} {
+      allow get: if isSignedIn() && isValidId(reportId) && (existing().reporterId == request.auth.uid || exists(/databases/$(database)/documents/users/$(request.auth.uid)));
+      allow list: if isSignedIn() && (resource.data.reporterId == request.auth.uid || exists(/databases/$(database)/documents/users/$(request.auth.uid)));
+      allow create: if isSignedIn() && isValidId(reportId) && incoming().reporterId == request.auth.uid && isValidReport(incoming());
+      allow update: if isSignedIn() && isValidId(reportId) && isValidReport(incoming())
+        && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
+      allow delete: if false;
+    }
+  }
+}
