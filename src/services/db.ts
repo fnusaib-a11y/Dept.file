@@ -15,7 +15,8 @@ import {
   NotificationItem, 
   StarPackage, 
   WithdrawalRequest, 
-  TransactionItem 
+  TransactionItem,
+  ReferralSettings
 } from '../types';
 
 import { initializeApp } from 'firebase/app';
@@ -45,6 +46,7 @@ const STORAGE_KEYS = {
   NOTIFICATIONS: 'starconnect_notifications_db',
   WITHDRAWALS: 'starconnect_withdrawals_db',
   TRANSACTIONS: 'starconnect_transactions_db',
+  REFERRAL_SETTINGS: 'starconnect_referral_settings',
 };
 
 // Standard Star Packages
@@ -101,7 +103,13 @@ const BOOTSTRAP_DATA = {
 
   withdrawals: [] as WithdrawalRequest[],
 
-  transactions: [] as TransactionItem[]
+  transactions: [] as TransactionItem[],
+
+  referralSettings: {
+    isEnabled: true,
+    signupBonusStars: 10,
+    purchaseCommissionPercent: 10
+  } as ReferralSettings
 };
 
 class StarConnectDatabaseService {
@@ -152,48 +160,9 @@ class StarConnectDatabaseService {
           this.firebaseAuthError = null;
           console.log("StarConnect Real Firestore Connected & Authenticated:", cred.user.uid);
           
-          // Migrate current session profile ID to match firebase auth UID for security policies
           const me = this.cache.currentUser;
-          if (me) {
-            const oldId = me.id;
-            const newId = cred.user.uid;
-            
-            if (oldId !== newId) {
-              console.log(`Migrating local user id from ${oldId} to ${newId} to align with active Firebase Auth account.`);
-              me.id = newId;
-              
-              // Migrate list entries
-              const meIdx = this.cache.users.findIndex(u => u.id === oldId);
-              if (meIdx !== -1) {
-                this.cache.users[meIdx].id = newId;
-              } else {
-                this.cache.users.push(me);
-              }
-              
-              // Migrate post authors & likes
-              this.cache.posts.forEach(p => {
-                if (p.authorId === oldId) {
-                  p.authorId = newId;
-                }
-                const pathIdx = p.likedBy.indexOf(oldId);
-                if (pathIdx !== -1) {
-                  p.likedBy[pathIdx] = newId;
-                }
-              });
-              
-              // Migrate comments
-              this.cache.comments.forEach(c => {
-                if (c.authorId === oldId) {
-                  c.authorId = newId;
-                }
-              });
-              
-              this.sync();
-              window.dispatchEvent(new CustomEvent('starconnect_db_update'));
-            }
-          }
           
-          // Push profile record so it exists in Firebase Users database
+          // Push profile record so it exists in Firebase Users database under their stable target ID
           if (me && this.db) {
             setDoc(doc(this.db, 'users', me.id), me).catch(console.warn);
           }
@@ -283,6 +252,7 @@ class StarConnectDatabaseService {
       const notifications = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
       const withdrawals = localStorage.getItem(STORAGE_KEYS.WITHDRAWALS);
       const transactions = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
+      const referralSettings = localStorage.getItem(STORAGE_KEYS.REFERRAL_SETTINGS);
 
       data.currentUser = uCurrent && uCurrent !== 'null' ? JSON.parse(uCurrent) : null;
       data.users = uAll ? JSON.parse(uAll) : BOOTSTRAP_DATA.users;
@@ -295,6 +265,7 @@ class StarConnectDatabaseService {
       data.notifications = notifications ? JSON.parse(notifications) : BOOTSTRAP_DATA.notifications;
       data.withdrawals = withdrawals ? JSON.parse(withdrawals) : BOOTSTRAP_DATA.withdrawals;
       data.transactions = transactions ? JSON.parse(transactions) : BOOTSTRAP_DATA.transactions;
+      data.referralSettings = referralSettings ? JSON.parse(referralSettings) : BOOTSTRAP_DATA.referralSettings;
       
       if (!uCurrent) this.saveToStorage(data);
       return data as typeof BOOTSTRAP_DATA;
@@ -320,7 +291,13 @@ class StarConnectDatabaseService {
       localStorage.setItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(data.notifications));
       localStorage.setItem(STORAGE_KEYS.WITHDRAWALS, JSON.stringify(data.withdrawals));
       localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(data.transactions));
-    } catch (e) {}
+      localStorage.setItem(STORAGE_KEYS.REFERRAL_SETTINGS, JSON.stringify(data.referralSettings));
+    } catch (e: any) {
+      console.error("[Storage Quota Info] Local storage exceeded 5MB limit or threw an exception:", e);
+      if (e.name === 'QuotaExceededError' || e.code === 22) {
+        console.warn("সতর্কতা: আপনার ব্রাউজারের লোকাল স্টোরেজ (৫ মেগাবাইট) পূর্ণ হয়ে গিয়েছে! অতিরিক্ত বড় ছবি বা ভিডিও আপলোড করার কারণে এটি হতে পারে।");
+      }
+    }
   }
 
   private sync() {
@@ -354,7 +331,7 @@ class StarConnectDatabaseService {
     return c1 === c2 || c1.endsWith(c2) || c2.endsWith(c1);
   }
 
-  signupUser(name: string, phone: string, email: string, password: string, role: 'user' | 'creator' = 'user'): { success: boolean; error?: string; user?: UserProfile } {
+  signupUser(name: string, phone: string, email: string, password: string, role: 'user' | 'creator' = 'user', referrerCodeInput?: string): { success: boolean; error?: string; user?: UserProfile } {
     const trimmedPhone = phone.trim();
     const trimmedEmail = email.trim();
     
@@ -362,6 +339,19 @@ class StarConnectDatabaseService {
     const existingLocal = this.cache.users.find(u => this.isSamePhone(u.phone, trimmedPhone));
     if (existingLocal) {
       return { success: false, error: 'এই মোবাইল নম্বরটি দিয়ে ইতোমধ্যে অ্যাকাউন্ট খোলা হয়েছে!' };
+    }
+
+    // Check referral code if provided
+    let referredByUser: UserProfile | undefined;
+    const refCodeClean = referrerCodeInput ? referrerCodeInput.trim().toLowerCase() : '';
+    if (refCodeClean) {
+      referredByUser = this.cache.users.find(u => 
+        (u.username && u.username.toLowerCase() === refCodeClean) || 
+        (u.referralCode && u.referralCode.toLowerCase() === refCodeClean)
+      );
+      if (!referredByUser) {
+        return { success: false, error: 'ভুল রেফার কোড! সঠিক রেফার কোড লিখুন অথবা ঘরটি খালি রাখুন।' };
+      }
     }
 
     const uid = 'user_' + Math.random().toString(36).substr(2, 9);
@@ -388,8 +378,53 @@ class StarConnectDatabaseService {
       starBalance: role === 'creator' ? 0 : 100, // starting balance
       totalStarsEarned: 0,
       totalStarsSpent: 0,
-      pendingBalanceStars: 0
+      pendingBalanceStars: 0,
+      
+      // Referral fields on signup
+      referralCode: username,
+      referredBy: referredByUser ? referredByUser.id : undefined,
+      referralsCount: 0,
+      totalReferralBonus: 0
     };
+
+    // Credit bonus to the referrer if settings allow it
+    const refSettings = this.cache.referralSettings || {
+      isEnabled: true,
+      signupBonusStars: 10,
+      purchaseCommissionPercent: 10
+    };
+
+    if (referredByUser && refSettings.isEnabled && refSettings.signupBonusStars > 0) {
+      referredByUser.starBalance = (referredByUser.starBalance || 0) + refSettings.signupBonusStars;
+      referredByUser.totalStarsEarned = (referredByUser.totalStarsEarned || 0) + refSettings.signupBonusStars;
+      referredByUser.referralsCount = (referredByUser.referralsCount || 0) + 1;
+      referredByUser.totalReferralBonus = (referredByUser.totalReferralBonus || 0) + refSettings.signupBonusStars;
+      
+      this.updateUserRecord(referredByUser);
+
+      this.addTransaction(
+        referredByUser.id, 
+        'post_earn', 
+        refSettings.signupBonusStars, 
+        undefined, 
+        uid, 
+        `নতুন মেম্বার রেফারেল বোনাস (${newUser.name})`
+      );
+
+      this.addNotification(
+        referredByUser.id, 
+        'user_admin', 
+        'StarConnect Referral', 
+        'https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=300&q=80', 
+        'stars_received', 
+        `অভিনন্দন! আপনার রেফারেল কোড ব্যবহার করে ${newUser.name} জয়েন করেছেন। আপনি ${refSettings.signupBonusStars}টি বোনাস স্টার পেয়েছেন! 🌟`
+      );
+
+      // Save updated referrer to Firestore if online
+      if (this.isFirebaseReady && this.db) {
+        setDoc(doc(this.db, 'users', referredByUser.id), referredByUser).catch(console.warn);
+      }
+    }
 
     this.cache.users.push(newUser);
     this.cache.currentUser = newUser;
@@ -494,6 +529,7 @@ class StarConnectDatabaseService {
     });
 
     this.sync();
+    window.dispatchEvent(new CustomEvent('starconnect_db_update'));
 
     if (this.isFirebaseReady && this.db) {
       setDoc(doc(this.db, 'users', user.id), user).catch(console.warn);
@@ -793,6 +829,49 @@ class StarConnectDatabaseService {
 
     this.addTransaction(me.id, 'buy_stars', pkg.starsCount, pkg.priceBDT, pkg.id, pkg.badge || 'স্টার রিচার্জ');
     this.addNotification(me.id, 'user_admin', 'StarConnect Billing', 'https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=300&q=80', 'premium', `অভিনন্দন! সফলভাবে বিকাশ/নগদের মাধ্যমে ${pkg.starsCount}টি স্টার রিচার্জ সম্পন্ন হয়েছে। ৳${pkg.priceBDT}`);
+
+    // Process referral purchase commission
+    const refSettings = this.cache.referralSettings || {
+      isEnabled: true,
+      signupBonusStars: 10,
+      purchaseCommissionPercent: 10
+    };
+
+    if (refSettings.isEnabled && me.referredBy) {
+      const referrer = this.getUserById(me.referredBy);
+      if (referrer) {
+        const commissionPercent = refSettings.purchaseCommissionPercent || 0;
+        const commissionStars = Math.floor((pkg.starsCount * commissionPercent) / 100);
+        if (commissionStars > 0) {
+          referrer.starBalance = (referrer.starBalance || 0) + commissionStars;
+          referrer.totalStarsEarned = (referrer.totalStarsEarned || 0) + commissionStars;
+          referrer.totalReferralBonus = (referrer.totalReferralBonus || 0) + commissionStars;
+          this.updateUserRecord(referrer);
+
+          this.addTransaction(
+            referrer.id, 
+            'post_earn', 
+            commissionStars, 
+            undefined, 
+            me.id, 
+            `রেফারেল রিচার্জ কমিশন (${me.name})`
+          );
+
+          this.addNotification(
+            referrer.id, 
+            'user_admin', 
+            'StarConnect Referral', 
+            'https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=300&q=80', 
+            'stars_received', 
+            `অভিনন্দন! আপনার রেফার করা ইউজার ${me.name} ${pkg.starsCount} স্টার রিচার্জ করেছেন। আপনি ${commissionStars} স্টার (${commissionPercent}%) বোনাস কমিশন পেয়েছেন! 🌟`
+          );
+
+          if (this.isFirebaseReady && this.db) {
+            setDoc(doc(this.db, 'users', referrer.id), referrer).catch(console.warn);
+          }
+        }
+      }
+    }
 
     this.sync();
     window.dispatchEvent(new CustomEvent('starconnect_db_update'));
@@ -1244,6 +1323,20 @@ class StarConnectDatabaseService {
       me.blockedUsers.push(userId);
     }
     this.updateUserRecord(me);
+    this.sync();
+    window.dispatchEvent(new CustomEvent('starconnect_db_update'));
+  }
+
+  getReferralSettings(): ReferralSettings {
+    return this.cache.referralSettings || {
+      isEnabled: true,
+      signupBonusStars: 10,
+      purchaseCommissionPercent: 10
+    };
+  }
+
+  updateReferralSettings(settings: ReferralSettings) {
+    this.cache.referralSettings = { ...settings };
     this.sync();
     window.dispatchEvent(new CustomEvent('starconnect_db_update'));
   }

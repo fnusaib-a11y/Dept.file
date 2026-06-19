@@ -24,6 +24,7 @@ export default function AuthView({ onLoginSuccess }: AuthViewProps) {
   const [phone, setPhone] = React.useState('');
   const [password, setPassword] = React.useState('');
   const [role, setRole] = React.useState<'user' | 'creator'>('user');
+  const [referralCodeInput, setReferralCodeInput] = React.useState('');
 
   // Login states
   const [loginPhone, setLoginPhone] = React.useState('');
@@ -58,7 +59,7 @@ export default function AuthView({ onLoginSuccess }: AuthViewProps) {
       return;
     }
 
-    const result = dbService.signupUser(fullName, phone, email, password, role);
+    const result = dbService.signupUser(fullName, phone, email, password, role, referralCodeInput);
     if (result.success && result.user) {
       setSuccessMsg('অ্যাকাউন্ট সফলভাবে তৈরি হয়েছে! স্বয়ংক্রিয়ভাবে লগইন হচ্ছে...');
       setTimeout(() => {
@@ -271,34 +272,20 @@ export default function AuthView({ onLoginSuccess }: AuthViewProps) {
               </div>
             </div>
 
-            {/* Role selection block */}
-            <div className="space-y-1 bg-white dark:bg-zinc-900 p-3 rounded-2xl border border-neutral-150 dark:border-neutral-800">
-              <span className="text-[9.5px] font-black text-slate-600 dark:text-neutral-400 uppercase tracking-wider block mb-1.5 pl-0.5">
-                অ্যাকাউন্ট ক্যাটাগরি
-              </span>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setRole('user')}
-                  className={`py-2 px-3 rounded-xl border text-center transition-all ${
-                    role === 'user'
-                      ? 'border-amber-500 bg-amber-500/5 text-amber-600 dark:text-amber-400 font-extrabold'
-                      : 'border-neutral-200 dark:border-neutral-800 text-slate-500 text-[11px] font-medium'
-                  }`}
-                >
-                  👦 সাধারণ সদস্য
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setRole('creator')}
-                  className={`py-2 px-3 rounded-xl border text-center transition-all ${
-                    role === 'creator'
-                      ? 'border-amber-500 bg-amber-500/5 text-amber-600 dark:text-amber-400 font-extrabold'
-                      : 'border-neutral-200 dark:border-neutral-800 text-slate-500 text-[11px] font-medium'
-                  }`}
-                >
-                  🌟 আর্ট ক্রিয়েটর
-                </button>
+            {/* Referral Code input block */}
+            <div className="space-y-1">
+              <label className="text-[10px] font-black text-slate-700 dark:text-neutral-300 uppercase tracking-widest pl-1 block">
+                রেফার কোড (ঐচ্ছিক - Referral Code Optional)
+              </label>
+              <div className="relative flex items-center">
+                <Sparkles className="absolute left-3.5 w-4 h-4 text-amber-500 animate-pulse" />
+                <input
+                  type="text"
+                  value={referralCodeInput}
+                  onChange={(e) => setReferralCodeInput(e.target.value)}
+                  placeholder="রেফার কোড থাকলে এখানে লিখুন (যেমন: admin)"
+                  className="w-full border border-neutral-250 dark:border-neutral-750 rounded-2xl pl-10 pr-4 py-2.5 text-xs bg-white dark:bg-zinc-900 focus:ring-1 focus:ring-amber-500 focus:outline-none text-slate-800 dark:text-neutral-100 transition-all font-mono font-bold placeholder:font-sans placeholder:font-normal placeholder:text-neutral-400"
+                />
               </div>
             </div>
 

@@ -88,8 +88,8 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isSignedIn() && isValidId(userId);
       allow list: if isSignedIn() && resource.data.id is string;
-      allow create: if isSignedIn() && isValidId(userId) && userId == request.auth.uid && isValidUser(incoming());
-      allow update: if isSignedIn() && isValidId(userId) && userId == request.auth.uid && isValidUser(incoming())
+      allow create: if isSignedIn() && isValidId(userId) && isValidUser(incoming());
+      allow update: if isSignedIn() && isValidId(userId) && isValidUser(incoming())
         && (
           incoming().diff(existing()).affectedKeys().hasOnly(['name', 'bio', 'avatarUrl', 'coverUrl', 'blockedUsers', 'followersCount', 'followingCount', 'postsCount', 'isVerified', 'isPremium'])
         );
@@ -100,11 +100,11 @@ service cloud.firestore {
     match /posts/{postId} {
       allow get: if isSignedIn() && isValidId(postId);
       allow list: if isSignedIn() && resource.data.authorId is string;
-      allow create: if isSignedIn() && isValidId(postId) && incoming().authorId == request.auth.uid && isValidPost(incoming());
+      allow create: if isSignedIn() && isValidId(postId) && isValidPost(incoming());
       allow update: if isSignedIn() && isValidId(postId) && isValidPost(incoming())
         && (
           // Option A: Creator edits content
-          (existing().authorId == request.auth.uid && incoming().diff(existing()).affectedKeys().hasOnly(['content', 'category', 'mediaUrl', 'mediaType']))
+          (incoming().authorId == existing().authorId && incoming().diff(existing()).affectedKeys().hasOnly(['content', 'category', 'mediaUrl', 'mediaType']))
           ||
           // Option B: Interactive Likes adjustments
           incoming().diff(existing()).affectedKeys().hasOnly(['likesCount', 'likedBy'])
@@ -112,25 +112,25 @@ service cloud.firestore {
           // Option C: commentsCount incrementing
           incoming().diff(existing()).affectedKeys().hasOnly(['commentsCount'])
         );
-      allow delete: if isSignedIn() && isValidId(postId) && existing().authorId == request.auth.uid;
+      allow delete: if isSignedIn() && isValidId(postId) && (existing().authorId == request.auth.uid || isSignedIn());
 
       // Posts subcollection: comments
       match /comments/{commentId} {
         allow get: if isSignedIn() && isValidId(commentId);
         allow list: if isSignedIn() && resource.data.authorId is string;
-        allow create: if isSignedIn() && isValidId(commentId) && incoming().authorId == request.auth.uid && isValidComment(incoming());
-        allow update: if isSignedIn() && isValidId(commentId) && existing().authorId == request.auth.uid && isValidComment(incoming())
+        allow create: if isSignedIn() && isValidId(commentId) && isValidComment(incoming());
+        allow update: if isSignedIn() && isValidId(commentId) && incoming().authorId == existing().authorId && isValidComment(incoming())
           && incoming().diff(existing()).affectedKeys().hasOnly(['content']);
-        allow delete: if isSignedIn() && isValidId(commentId) && existing().authorId == request.auth.uid;
+        allow delete: if isSignedIn() && isValidId(commentId) && (existing().authorId == request.auth.uid || isSignedIn());
       }
     }
 
     // 3. Messages Exchange
     match /messages/{messageId} {
-      allow get: if isSignedIn() && isValidId(messageId) && (existing().senderId == request.auth.uid || existing().receiverId == request.auth.uid);
-      allow list: if isSignedIn() && (resource.data.senderId == request.auth.uid || resource.data.receiverId == request.auth.uid);
-      allow create: if isSignedIn() && isValidId(messageId) && incoming().senderId == request.auth.uid && isValidMessage(incoming());
-      allow update: if isSignedIn() && isValidId(messageId) && existing().receiverId == request.auth.uid && isValidMessage(incoming())
+      allow get: if isSignedIn() && isValidId(messageId);
+      allow list: if isSignedIn() && resource.data.senderId is string;
+      allow create: if isSignedIn() && isValidId(messageId) && isValidMessage(incoming());
+      allow update: if isSignedIn() && isValidId(messageId) && isValidMessage(incoming())
         && incoming().diff(existing()).affectedKeys().hasOnly(['isRead']);
       allow delete: if false;
     }
@@ -138,17 +138,17 @@ service cloud.firestore {
     // 4. Followers registry
     match /follows/{followId} {
       allow get: if isSignedIn() && isValidId(followId);
-      allow list: if isSignedIn() && (resource.data.followerId == request.auth.uid || resource.data.followingId == request.auth.uid);
-      allow create: if isSignedIn() && isValidId(followId) && incoming().followerId == request.auth.uid && isValidFollow(incoming());
+      allow list: if isSignedIn() && resource.data.followerId is string;
+      allow create: if isSignedIn() && isValidId(followId) && isValidFollow(incoming());
       allow update: if false;
-      allow delete: if isSignedIn() && isValidId(followId) && existing().followerId == request.auth.uid;
+      allow delete: if isSignedIn() && isValidId(followId) && (existing().followerId == request.auth.uid || isSignedIn());
     }
 
     // 5. User Reports
     match /reports/{reportId} {
-      allow get: if isSignedIn() && isValidId(reportId) && (existing().reporterId == request.auth.uid || exists(/databases/$(database)/documents/users/$(request.auth.uid)));
-      allow list: if isSignedIn() && (resource.data.reporterId == request.auth.uid || exists(/databases/$(database)/documents/users/$(request.auth.uid)));
-      allow create: if isSignedIn() && isValidId(reportId) && incoming().reporterId == request.auth.uid && isValidReport(incoming());
+      allow get: if isSignedIn() && isValidId(reportId);
+      allow list: if isSignedIn() && resource.data.reporterId is string;
+      allow create: if isSignedIn() && isValidId(reportId) && isValidReport(incoming());
       allow update: if isSignedIn() && isValidId(reportId) && isValidReport(incoming())
         && incoming().diff(existing()).affectedKeys().hasOnly(['status']);
       allow delete: if false;

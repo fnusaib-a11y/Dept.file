@@ -12,7 +12,7 @@ interface AdminPanelViewProps {
   onBack: () => void;
 }
 
-type AdminTab = 'kyc' | 'withdrawals' | 'reports' | 'users';
+type AdminTab = 'kyc' | 'withdrawals' | 'reports' | 'users' | 'referrals';
 
 export default function AdminPanelView({ onBack }: AdminPanelViewProps) {
   const [activeTab, setActiveTab] = React.useState<AdminTab>('kyc');
@@ -20,11 +20,17 @@ export default function AdminPanelView({ onBack }: AdminPanelViewProps) {
   const [allUsers, setAllUsers] = React.useState<UserProfile[]>([]);
   const [withdrawals, setWithdrawals] = React.useState<WithdrawalRequest[]>([]);
   const [transactions, setTransactions] = React.useState<TransactionItem[]>([]);
+  const [refSettings, setRefSettings] = React.useState({
+    isEnabled: true,
+    signupBonusStars: 10,
+    purchaseCommissionPercent: 10
+  });
 
   const loadAdminData = () => {
     setReports(dbService.getReports());
     setAllUsers(dbService.getUsers());
     setWithdrawals(dbService.getWithdrawalHistory());
+    setRefSettings(dbService.getReferralSettings());
     
     // Aggregate global transaction logs
     const allTxs: TransactionItem[] = [];
@@ -137,7 +143,7 @@ export default function AdminPanelView({ onBack }: AdminPanelViewProps) {
         </div>
 
         {/* Tab Selection Row */}
-        <div className="grid grid-cols-4 gap-1.5 bg-white dark:bg-zinc-900 p-1.5 rounded-2xl border border-neutral-200">
+        <div className="grid grid-cols-5 gap-1.5 bg-white dark:bg-zinc-900 p-1.5 rounded-2xl border border-neutral-200">
           <button
             onClick={() => setActiveTab('kyc')}
             className={`py-2 rounded-xl text-[10px] font-black transition text-center flex flex-col items-center gap-1 cursor-pointer ${
@@ -192,6 +198,18 @@ export default function AdminPanelView({ onBack }: AdminPanelViewProps) {
           >
             <UserX className="w-4 h-4 shrink-0" />
             <span>ইউজারস</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('referrals')}
+            className={`py-2 rounded-xl text-[10px] font-black transition text-center flex flex-col items-center gap-1 cursor-pointer ${
+              activeTab === 'referrals'
+                ? 'bg-indigo-650 text-white font-extrabold shadow-sm'
+                : 'text-zinc-500 hover:bg-slate-50'
+            }`}
+          >
+            <Coins className="w-4 h-4 shrink-0" />
+            <span>রেফারেল</span>
           </button>
         </div>
 
@@ -438,6 +456,132 @@ export default function AdminPanelView({ onBack }: AdminPanelViewProps) {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          )}
+
+          {/* Tab E: Referral Settings and Commission Control */}
+          {activeTab === 'referrals' && (
+            <div className="space-y-4">
+              <div className="bg-white dark:bg-neutral-900 border border-neutral-150 rounded-[22px] p-5 shadow-sm space-y-4 animate-fadeIn">
+                <div className="flex justify-between items-center pb-2 border-b border-neutral-100 dark:border-neutral-800">
+                  <div>
+                    <h3 className="text-sm font-extrabold text-slate-800 dark:text-zinc-200">রেফারেল ও কমিশন সিস্টেম</h3>
+                    <p className="text-[10px] text-zinc-400 font-bold">আইপড বা এডমিন প্যানেল কনফিগারেশন</p>
+                  </div>
+                  
+                  {/* Toggle Switch */}
+                  <button
+                    onClick={() => {
+                      const updated = { ...refSettings, isEnabled: !refSettings.isEnabled };
+                      setRefSettings(updated);
+                      dbService.updateReferralSettings(updated);
+                    }}
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                      refSettings.isEnabled ? 'bg-indigo-600' : 'bg-zinc-300'
+                    }`}
+                  >
+                    <span
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                        refSettings.isEnabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div className="space-y-4 pt-2">
+                  {/* Signup Bonus Stars */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-black text-slate-700 dark:text-neutral-300 uppercase tracking-wide">
+                      নতুন মেম্বার সাইন-আপ বোনাস (Stars)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        disabled={!refSettings.isEnabled}
+                        type="number"
+                        min="0"
+                        value={refSettings.signupBonusStars}
+                        onChange={(e) => {
+                          const val = Math.max(0, parseInt(e.target.value) || 0);
+                          const updated = { ...refSettings, signupBonusStars: val };
+                          setRefSettings(updated);
+                        }}
+                        className="w-full border border-neutral-200 dark:border-neutral-800 rounded-xl px-3 py-2 text-xs font-mono font-bold bg-white dark:bg-zinc-950 focus:outline-none text-slate-800 dark:text-neutral-200 disabled:opacity-50"
+                      />
+                      <span className="text-xs text-zinc-500 font-bold shrink-0">স্টারস</span>
+                    </div>
+                    <p className="text-[9.5px] text-zinc-400">কেউ অন্য কারো রেফার কোড ব্যবহার করে অ্যাকাউন্ট খুললে রেফারকারী এই বোনাসটি পাবেন।</p>
+                  </div>
+
+                  {/* Purchase Commission Rate */}
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-black text-slate-700 dark:text-neutral-300 uppercase tracking-wide">
+                      স্টার রিচার্জ কমিশন রেট (%)
+                    </label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        disabled={!refSettings.isEnabled}
+                        type="number"
+                        min="0"
+                        max="100"
+                        value={refSettings.purchaseCommissionPercent}
+                        onChange={(e) => {
+                          const val = Math.min(100, Math.max(0, parseInt(e.target.value) || 0));
+                          const updated = { ...refSettings, purchaseCommissionPercent: val };
+                          setRefSettings(updated);
+                        }}
+                        className="w-full border border-neutral-200 dark:border-neutral-800 rounded-xl px-3 py-2 text-xs font-mono font-bold bg-white dark:bg-zinc-950 focus:outline-none text-slate-800 dark:text-neutral-200 disabled:opacity-50"
+                      />
+                      <span className="text-xs text-zinc-500 font-bold shrink-0">পারসেন্ট</span>
+                    </div>
+                    <p className="text-[9.5px] text-zinc-400">রেফার করা নতুন মেম্বার স্টার রিচার্জ করলে রেফারকারী কত পারসেন্ট কমিশন স্টার লাভ করবেন।</p>
+                  </div>
+
+                  <button
+                    disabled={!refSettings.isEnabled}
+                    onClick={() => {
+                      dbService.updateReferralSettings(refSettings);
+                      alert('রেফারেল ও কমিশন সেটিংস সফলভাবে আপডেট করা হয়েছে! 🌟🔒');
+                    }}
+                    className="w-full py-3 rounded-xl bg-indigo-650 hover:bg-indigo-700 text-white text-xs font-extrabold shadow-md hover:shadow-lg transition flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    <Coins className="w-4 h-4" />
+                    <span>সেটিংস পরিবর্তন সংরক্ষণ করুন</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Referral leaderboard/report of referrers */}
+              <div className="bg-white dark:bg-neutral-900 border border-neutral-150 rounded-[22px] p-5 shadow-sm space-y-3">
+                <span className="text-xs font-black text-slate-400 uppercase tracking-widest pl-1">টপ রেফারার তালিকা</span>
+                
+                <div className="divide-y divide-neutral-100 dark:divide-neutral-850">
+                  {allUsers
+                    .filter(u => (u.referralsCount || 0) > 0)
+                    .sort((a, b) => (b.referralsCount || 0) - (a.referralsCount || 0))
+                    .map((user, i) => (
+                      <div key={user.id} className="py-3 flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="text-xs font-bold text-indigo-650">#{i + 1}</span>
+                          <div className="w-8 h-8 rounded-full overflow-hidden shrink-0 border border-neutral-100">
+                            <img src={user.avatarUrl} alt={user.name} className="w-full h-full object-cover" />
+                          </div>
+                          <div>
+                            <span className="text-xs font-extrabold text-slate-800 dark:text-zinc-200">{user.name}</span>
+                            <span className="text-[9.5px] font-mono text-zinc-400 block">কোড: {user.referralCode || user.username}</span>
+                          </div>
+                        </div>
+                        
+                        <div className="text-right">
+                          <span className="text-xs font-black text-slate-800 dark:text-zinc-150 block">{user.referralsCount} জন রেফার</span>
+                          <span className="text-[9px] text-amber-600 dark:text-amber-450 font-bold block">⭐ +{(user.totalReferralBonus || 0)} বোনাস লাভ</span>
+                        </div>
+                      </div>
+                    ))}
+                  {allUsers.filter(u => (u.referralsCount || 0) > 0).length === 0 && (
+                    <p className="text-xs text-neutral-400 text-center py-6">এখনো কেউ সফল কোনো রেফার সম্পন্ন করেননি।</p>
+                  )}
+                </div>
               </div>
             </div>
           )}

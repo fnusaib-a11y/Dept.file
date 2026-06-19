@@ -29,6 +29,7 @@ export default function App() {
 
   // Messenger routing helpers
   const [selectedChatPartnerId, setSelectedChatPartnerId] = React.useState<string | undefined>(undefined);
+  const [editProfileOpen, setEditProfileOpen] = React.useState(false);
 
   // Load user
   React.useEffect(() => {
@@ -81,7 +82,9 @@ export default function App() {
         return (
           <ProfileView
             onNavigate={(screen) => setCurrentScreen(screen as AppScreen)}
-            onEditProfile={() => setCurrentScreen(AppScreen.CREATE_POST)} // routes to create post to upload edits easily
+            onEditProfile={() => setEditProfileOpen(true)}
+            editProfileOpen={editProfileOpen}
+            onEditProfileClose={() => setEditProfileOpen(false)}
             onPostSelect={(post) => {
               setCurrentScreen(AppScreen.FEED);
             }}
@@ -91,7 +94,14 @@ export default function App() {
         return (
           <SettingsView
             onBack={() => setCurrentScreen(AppScreen.PROFILE)}
-            onNavigate={(screen) => setCurrentScreen(screen as AppScreen)}
+            onNavigate={(screen) => {
+              if (screen === 'EDIT_PROFILE') {
+                setEditProfileOpen(true);
+                setCurrentScreen(AppScreen.PROFILE);
+              } else {
+                setCurrentScreen(screen as AppScreen);
+              }
+            }}
             onLogout={handleLogout}
           />
         );

@@ -4,25 +4,162 @@
  */
 
 import React from 'react';
-import { Settings, Camera, UserCheck, Shield, CheckCircle, Award } from 'lucide-react';
+import { Settings, Camera, UserCheck, Shield, CheckCircle, Award, X, Mail, Sparkles, Image as ImageIcon } from 'lucide-react';
 import { UserProfile, Post } from '../types';
 import { dbService } from '../services/db';
 
 interface ProfileViewProps {
   onNavigate: (screen: string) => void;
   onEditProfile: () => void;
+  editProfileOpen?: boolean;
+  onEditProfileClose?: () => void;
   onPostSelect?: (post: Post) => void;
 }
 
-export default function ProfileView({ onNavigate, onEditProfile, onPostSelect }: ProfileViewProps) {
+const PRESET_AVATARS = [
+  { name: '👦', url: 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?auto=format&fit=crop&w=150&q=80' },
+  { name: '👧', url: 'https://images.unsplash.com/photo-1494790108377-be9c29b29330?auto=format&fit=crop&w=150&q=80' },
+  { name: '🧑‍🦱', url: 'https://images.unsplash.com/photo-1570295999919-56ceb5ecca61?auto=format&fit=crop&w=150&q=80' },
+  { name: '👩‍🦰', url: 'https://images.unsplash.com/photo-1438761681033-6461ffad8d80?auto=format&fit=crop&w=150&q=80' },
+  { name: '👱‍♂️', url: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=150&q=80' },
+  { name: '🐱', url: 'https://images.unsplash.com/photo-1514888286974-6c03e2ca1dba?auto=format&fit=crop&w=150&q=80' }
+];
+
+const PRESET_COVERS = [
+  { name: '🌌 Space', url: 'https://images.unsplash.com/photo-1451187580459-43490279c0fa?auto=format&fit=crop&w=800&q=80' },
+  { name: '⛰️ Nature', url: 'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=80' },
+  { name: '🌆 Neon', url: 'https://images.unsplash.com/photo-1513542789411-b6a5d4f31634?auto=format&fit=crop&w=800&q=80' }
+];
+
+export default function ProfileView({ onNavigate, onEditProfile, editProfileOpen, onEditProfileClose, onPostSelect }: ProfileViewProps) {
   const [currentUser, setCurrentUser] = React.useState<UserProfile>(dbService.getCurrentUser());
   const [myPosts, setMyPosts] = React.useState<Post[]>([]);
+  
+  // Profile edit form fields state
+  const [isEditing, setIsEditing] = React.useState(false);
+  const [editName, setEditName] = React.useState('');
+  const [editBio, setEditBio] = React.useState('');
+  const [editEmail, setEditEmail] = React.useState('');
+  const [editAvatarUrl, setEditAvatarUrl] = React.useState('');
+  const [editCoverUrl, setEditCoverUrl] = React.useState('');
 
   React.useEffect(() => {
     // Fetch posts from dbService for this author
     const posts = dbService.getPosts('সব').filter(p => p.authorId === currentUser.id);
     setMyPosts(posts);
   }, [currentUser]);
+
+  React.useEffect(() => {
+    if (editProfileOpen) {
+      setEditName(currentUser.name || '');
+      setEditBio(currentUser.bio || '');
+      setEditEmail(currentUser.email || '');
+      setEditAvatarUrl(currentUser.avatarUrl || '');
+      setEditCoverUrl(currentUser.coverUrl || '');
+      setIsEditing(true);
+    } else {
+      setIsEditing(false);
+    }
+  }, [editProfileOpen, currentUser]);
+
+  const resizeAndCompressImage = (
+    file: File, 
+    maxWidth: number, 
+    maxHeight: number, 
+    quality: number,
+    callback: (base64Result: string) => void
+  ) => {
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxWidth) {
+            height *= maxWidth / width;
+            width = maxWidth;
+          }
+        } else {
+          if (height > maxHeight) {
+            width *= maxHeight / height;
+            height = maxHeight;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressed = canvas.toDataURL('image/jpeg', quality);
+          callback(compressed);
+        } else {
+          callback(event.target?.result as string);
+        }
+      };
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    
+    if (file.size > 10 * 1024 * 1024) {
+      alert('অনুগ্রহ করে ১০ মেগাবাইটের কম সাইজের ছবি সিলেক্ট করুন।');
+      return;
+    }
+
+    resizeAndCompressImage(file, 256, 256, 0.6, (compressedBase64) => {
+      setEditAvatarUrl(compressedBase64);
+    });
+  };
+
+  const handleCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert('অনুগ্রহ করে ১০ মেগাবাইটের কম সাইজের ছবি সিলেক্ট করুন।');
+      return;
+    }
+
+    resizeAndCompressImage(file, 720, 360, 0.65, (compressedBase64) => {
+      setEditCoverUrl(compressedBase64);
+    });
+  };
+
+  const handleSaveProfile = () => {
+    if (!editName.trim()) {
+      alert('দয়া করে আপনার নাম প্রদান করুন।');
+      return;
+    }
+    dbService.updateProfile({
+      name: editName,
+      bio: editBio,
+      email: editEmail,
+      avatarUrl: editAvatarUrl,
+      coverUrl: editCoverUrl
+    });
+    alert('প্রোফাইল সফলভাবে আপডেট করা হয়েছে! 🌟🌸');
+    if (onEditProfileClose) {
+      onEditProfileClose();
+    } else {
+      setIsEditing(false);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    if (onEditProfileClose) {
+      onEditProfileClose();
+    } else {
+      setIsEditing(false);
+    }
+  };
 
   // Helper to re-read current user profile instantly or on interval polling
   React.useEffect(() => {
@@ -211,6 +348,177 @@ export default function ProfileView({ onNavigate, onEditProfile, onPostSelect }:
             <Shield className="w-4 h-4" />
             <span>অ্যাডমিন ড্যাশবোর্ড স্ক্রীন</span>
           </button>
+        </div>
+      )}
+
+      {/* Edit Profile Modal/Overlay */}
+      {isEditing && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-fadeIn">
+          <div className="bg-white dark:bg-neutral-900 w-full sm:max-w-md rounded-t-[28px] sm:rounded-[28px] overflow-hidden shadow-2xl flex flex-col max-h-[90vh] sm:max-h-[85vh]">
+            
+            {/* Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-neutral-100 dark:border-neutral-800 shrink-0">
+              <div className="flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-amber-500" />
+                <h3 className="font-extrabold text-slate-900 dark:text-neutral-100 text-sm">প্রোফাইল এডিট করুন</h3>
+              </div>
+              <button
+                onClick={handleCancelEdit}
+                className="p-1.5 rounded-full hover:bg-neutral-100 dark:hover:bg-neutral-800 transition text-neutral-500"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body Scroll Space */}
+            <div className="p-6 overflow-y-auto space-y-5">
+              
+              {/* Profile Name & Bio & Email */}
+              <div className="space-y-4">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-neutral-450 uppercase tracking-wider block">নাম</label>
+                  <input
+                    type="text"
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    placeholder="আপনার নাম লিখুন"
+                    className="w-full text-xs font-bold border border-neutral-200 dark:border-neutral-800 rounded-xl px-3 py-2.5 bg-neutral-50 dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white text-slate-800 dark:text-neutral-150"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-neutral-450 uppercase tracking-wider block">ইমেইল</label>
+                  <input
+                    type="email"
+                    value={editEmail}
+                    onChange={(e) => setEditEmail(e.target.value)}
+                    placeholder="আপনার ইমেইল"
+                    className="w-full text-xs font-bold border border-neutral-200 dark:border-neutral-800 rounded-xl px-3 py-2.5 bg-neutral-50 dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white text-slate-800 dark:text-neutral-155"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-[10px] font-black text-neutral-450 uppercase tracking-wider block">বায়ো বা স্ট্যাটাস</label>
+                  <textarea
+                    rows={2}
+                    value={editBio}
+                    onChange={(e) => setEditBio(e.target.value)}
+                    placeholder="নিজের সম্পর্কে কিছু লিখুন..."
+                    className="w-full text-xs font-bold border border-neutral-200 dark:border-neutral-800 rounded-xl px-3 py-2.5 bg-neutral-50 dark:bg-zinc-950 focus:outline-none focus:ring-2 focus:ring-amber-500 focus:bg-white text-slate-800 dark:text-neutral-157 resize-none"
+                  />
+                </div>
+              </div>
+
+              {/* Avatar Preset & Input Selection */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-neutral-450 uppercase tracking-wider block">প্রোফাইল ছবি (অবতার সেটিংস)</label>
+                <div className="flex flex-wrap gap-2 pb-1">
+                  {/* Gallery Upload Option */}
+                  <label className="relative w-12 h-12 rounded-full overflow-hidden border-2 border-dashed border-amber-400 bg-amber-500/5 hover:bg-amber-500/10 cursor-pointer transition flex flex-col items-center justify-center text-center shrink-0">
+                    <Camera className="w-5 h-5 text-amber-500" />
+                    <span className="text-[7.5px] font-black text-amber-600 mt-0.5">গ্যালারি</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleAvatarUpload}
+                    />
+                  </label>
+
+                  {PRESET_AVATARS.map((av) => (
+                    <button
+                      key={av.url}
+                      type="button"
+                      onClick={() => setEditAvatarUrl(av.url)}
+                      className={`relative w-12 h-12 rounded-full overflow-hidden border-2 cursor-pointer transition ${
+                        editAvatarUrl === av.url ? 'border-amber-500 scale-105' : 'border-neutral-200 hover:border-neutral-300'
+                      }`}
+                    >
+                      <img src={av.url} alt="av" className="w-full h-full object-cover" />
+                      <div className="absolute inset-0 bg-black/10 flex items-center justify-center text-xs">
+                        {av.name}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+                
+                <div className="flex gap-2">
+                  <span className="text-[10px] text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1.5 rounded-lg font-bold shrink-0 flex items-center gap-1">
+                    <ImageIcon className="w-3 h-3" /> URL
+                  </span>
+                  <input
+                    type="text"
+                    value={editAvatarUrl}
+                    onChange={(e) => setEditAvatarUrl(e.target.value)}
+                    placeholder="বা সরাসরি ছবির লিংক দিন (Image URL)"
+                    className="w-full text-[11px] font-mono border border-neutral-200 dark:border-neutral-800 rounded-xl px-2.5 py-1.5 bg-neutral-50 dark:bg-zinc-950 focus:outline-none text-slate-800 dark:text-neutral-159"
+                  />
+                </div>
+              </div>
+
+              {/* Cover Photo Custom & Preset selection */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-black text-neutral-450 uppercase tracking-wider block">কভার ছবি (অ্যাপ ব্যাকগ্রাউন্ড)</label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pb-1">
+                  {/* Gallery Upload Option */}
+                  <label className="relative h-11 rounded-lg overflow-hidden border border-dashed border-amber-400 bg-amber-500/5 hover:bg-amber-500/10 cursor-pointer transition flex items-center justify-center text-center px-1">
+                    <Camera className="w-4 h-4 text-amber-500 mr-1" />
+                    <span className="text-[9.5px]/none font-extrabold text-amber-600">গ্যালারি কভার</span>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={handleCoverUpload}
+                    />
+                  </label>
+
+                  {PRESET_COVERS.map((cv) => (
+                    <button
+                      key={cv.url}
+                      type="button"
+                      onClick={() => setEditCoverUrl(cv.url)}
+                      className={`relative h-11 rounded-lg overflow-hidden border cursor-pointer transition text-left px-2 flex items-center ${
+                        editCoverUrl === cv.url ? 'border-amber-500 bg-amber-50/25 dark:bg-amber-950/20' : 'border-neutral-200 hover:border-neutral-300'
+                      }`}
+                    >
+                      <span className="text-[10px] font-black text-slate-700 dark:text-neutral-300">{cv.name}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex gap-2">
+                  <span className="text-[10px] text-zinc-400 bg-zinc-100 dark:bg-zinc-800 px-2.5 py-1.5 rounded-lg font-bold shrink-0 flex items-center gap-1">
+                    <ImageIcon className="w-3 h-3" /> URL
+                  </span>
+                  <input
+                    type="text"
+                    value={editCoverUrl}
+                    onChange={(e) => setEditCoverUrl(e.target.value)}
+                    placeholder="বা সরাসরি কভার ছবির লিংক দিন"
+                    className="w-full text-[11px] font-mono border border-neutral-200 dark:border-neutral-800 rounded-xl px-2.5 py-1.5 bg-neutral-50 dark:bg-zinc-950 focus:outline-none text-slate-800 dark:text-neutral-161"
+                  />
+                </div>
+              </div>
+
+            </div>
+
+            {/* Modal Footer Controls */}
+            <div className="p-4 bg-slate-50 dark:bg-neutral-950 border-t border-neutral-100 dark:border-neutral-850 flex gap-3 shrink-0">
+              <button
+                onClick={handleCancelEdit}
+                className="flex-1 py-3 text-xs font-black text-zinc-500 bg-white hover:bg-zinc-100 border border-neutral-250 rounded-xl cursor-pointer transition text-center"
+              >
+                বাতিল
+              </button>
+              <button
+                onClick={handleSaveProfile}
+                className="flex-1 py-3 text-xs font-black text-white bg-amber-500 hover:bg-amber-600 rounded-xl shadow-md cursor-pointer transition text-center"
+              >
+                পরিবর্তন সংরক্ষণ করুন
+              </button>
+            </div>
+
+          </div>
         </div>
       )}
     </div>

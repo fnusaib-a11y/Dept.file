@@ -21,6 +21,94 @@ export default function CreatePostView({ onClose, onPostCreated }: CreatePostVie
   
   const [mediaType, setMediaType] = React.useState<'image' | 'video' | 'none'>('none');
   const [mediaUrl, setMediaUrl] = React.useState<string>('');
+  const [originalFileResult, setOriginalFileResult] = React.useState<string>('');
+  const [selectedAspect, setSelectedAspect] = React.useState<'16_9' | '1_1' | '9_16' | 'original'>('original');
+
+  const applyImageAspect = (resultUrl: string, aspect: '16_9' | '1_1' | '9_16' | 'original') => {
+    if (!resultUrl) return;
+    const img = new Image();
+    img.src = resultUrl;
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      if (aspect === 'original') {
+        let width = img.width;
+        let height = img.height;
+        const MAX_WIDTH = 720;
+        const MAX_HEIGHT = 720;
+        if (width > height) {
+          if (width > MAX_WIDTH) {
+            height *= MAX_WIDTH / width;
+            width = MAX_WIDTH;
+          }
+        } else {
+          if (height > MAX_HEIGHT) {
+            width *= MAX_HEIGHT / height;
+            height = MAX_HEIGHT;
+          }
+        }
+        canvas.width = width;
+        canvas.height = height;
+        ctx.drawImage(img, 0, 0, width, height);
+      } else if (aspect === '16_9') {
+        const targetWidth = 720;
+        const targetHeight = 405;
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        
+        const srcRatio = img.width / img.height;
+        const targetRatio = 16 / 9;
+        
+        let sx = 0, sy = 0, sWidth = img.width, sHeight = img.height;
+        if (srcRatio > targetRatio) {
+          sWidth = img.height * targetRatio;
+          sx = (img.width - sWidth) / 2;
+        } else {
+          sHeight = img.width / targetRatio;
+          sy = (img.height - sHeight) / 2;
+        }
+        ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, targetWidth, targetHeight);
+      } else if (aspect === '9_16') {
+        const targetWidth = 405;
+        const targetHeight = 720;
+        canvas.width = targetWidth;
+        canvas.height = targetHeight;
+        
+        const srcRatio = img.width / img.height;
+        const targetRatio = 9 / 16;
+        
+        let sx = 0, sy = 0, sWidth = img.width, sHeight = img.height;
+        if (srcRatio > targetRatio) {
+          sWidth = img.height * targetRatio;
+          sx = (img.width - sWidth) / 2;
+        } else {
+          sHeight = img.width / targetRatio;
+          sy = (img.height - sHeight) / 2;
+        }
+        ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, targetWidth, targetHeight);
+      } else if (aspect === '1_1') {
+        const targetSize = 512;
+        canvas.width = targetSize;
+        canvas.height = targetSize;
+        
+        let sx = 0, sy = 0, sWidth = img.width, sHeight = img.height;
+        if (img.width > img.height) {
+          sWidth = img.height;
+          sx = (img.width - sWidth) / 2;
+        } else {
+          sHeight = img.width;
+          sy = (img.height - sHeight) / 2;
+        }
+        ctx.drawImage(img, sx, sy, sWidth, sHeight, 0, 0, targetSize, targetSize);
+      }
+
+      const compressedResult = canvas.toDataURL('image/jpeg', 0.55);
+      setMediaUrl(compressedResult);
+      setMediaType('image');
+    };
+  };
 
   // AI states
   const [aiTopic, setAiTopic] = React.useState('');
@@ -99,10 +187,9 @@ export default function CreatePostView({ onClose, onPostCreated }: CreatePostVie
 
     const fileType = file.type;
     const isImage = fileType.startsWith('image/');
-    const isVideo = fileType.startsWith('video/');
 
-    if (!isImage && !isVideo) {
-      alert('অনুগ্রহ করে শুধুমাত্র ছবি বা ভিডিও ফাইল সিলেক্ট করুন।');
+    if (!isImage) {
+      alert('সতর্কতা: শুধুমাত্র ফটো ফাইল আপলোড করা যাবে। অনুগ্রহ করে একটি ছবি সিলেক্ট করুন।');
       return;
     }
 
@@ -116,47 +203,8 @@ export default function CreatePostView({ onClose, onPostCreated }: CreatePostVie
       const result = event.target?.result as string;
       if (!result) return;
 
-      if (isImage) {
-        // Compress image using canvas
-        const img = new Image();
-        img.src = result;
-        img.onload = () => {
-          const canvas = document.createElement('canvas');
-          let width = img.width;
-          let height = img.height;
-          
-          // Max size bounds
-          const MAX_WIDTH = 800;
-          const MAX_HEIGHT = 800;
-          if (width > height) {
-            if (width > MAX_WIDTH) {
-              height *= MAX_WIDTH / width;
-              width = MAX_WIDTH;
-            }
-          } else {
-            if (height > MAX_HEIGHT) {
-              width *= MAX_HEIGHT / height;
-              height = MAX_HEIGHT;
-            }
-          }
-
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext('2d');
-          ctx?.drawImage(img, 0, 0, width, height);
-          
-          const compressedResult = canvas.toDataURL('image/jpeg', 0.7);
-          setMediaUrl(compressedResult);
-          setMediaType('image');
-        };
-      } else {
-        if (file.size > 3 * 1024 * 1024) {
-          alert('ভিডিও ফাইল ৩ মেগাবাইটের বেশি মেমরি ব্যবহার করবে। ছোট সাইজের ভিডিও ট্রাই করুন।');
-        }
-        setMediaUrl(result);
-        setMediaType('video');
-        setCategory('বিনোদন');
-      }
+      setOriginalFileResult(result);
+      applyImageAspect(result, selectedAspect);
     };
     reader.readAsDataURL(file);
   };
@@ -174,7 +222,7 @@ export default function CreatePostView({ onClose, onPostCreated }: CreatePostVie
           >
             <X className="w-5 h-5" />
           </button>
-          <span className="text-base font-extrabold text-slate-800 dark:text-white">নতুন প্রিমিয়াম ফটো বা ভিডিও</span>
+          <span className="text-base font-extrabold text-slate-800 dark:text-white">নতুন প্রিমিয়াম ফটো</span>
         </div>
         
         <button
@@ -205,7 +253,7 @@ export default function CreatePostView({ onClose, onPostCreated }: CreatePostVie
         <div className="space-y-1 bg-white dark:bg-zinc-900 px-4 py-3 border border-neutral-150 rounded-2xl">
           <label className="text-[10px] font-black text-zinc-400 uppercase block mb-1">ক্যাপশন বা বিবরণ (Description)</label>
           <textarea
-            placeholder="ফটো বা ভিডিওর মনোরম গল্পটি এখানে বলুন..."
+            placeholder="ফটোর মনোরম গল্পটি এখানে বলুন..."
             value={content}
             onChange={(e) => setContent(e.target.value)}
             className="w-full h-24 resize-none focus:outline-none text-xs leading-relaxed bg-transparent text-slate-800 dark:text-white"
@@ -259,22 +307,89 @@ export default function CreatePostView({ onClose, onPostCreated }: CreatePostVie
 
         {/* Selected Media Preview container */}
         {mediaUrl ? (
-          <div className="relative rounded-2xl overflow-hidden aspect-video bg-neutral-950 shadow-sm border border-neutral-200">
-            {mediaType === 'image' ? (
-              <img src={mediaUrl} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <video src={mediaUrl} controls className="w-full h-full object-cover" />
+          <div className="space-y-3">
+            <div className="relative rounded-2xl overflow-hidden bg-neutral-950 dark:bg-black shadow-sm border border-neutral-200 dark:border-neutral-800 flex items-center justify-center min-h-[220px] max-h-[480px]">
+              {mediaType === 'image' ? (
+                <img src={mediaUrl} alt="" className="w-full h-auto max-h-[480px] object-contain" />
+              ) : (
+                <video src={mediaUrl} controls className="w-full h-auto max-h-[480px] object-contain" />
+              )}
+              <button
+                type="button"
+                onClick={() => {
+                  setMediaUrl('');
+                  setMediaType('none');
+                  setOriginalFileResult('');
+                }}
+                className="absolute top-2.5 right-2.5 bg-black/60 text-white p-2 rounded-full hover:bg-black transition z-10"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {mediaType === 'image' && originalFileResult && (
+              <div className="bg-white dark:bg-zinc-900 border border-neutral-150 dark:border-neutral-800 p-3.5 rounded-2xl flex flex-col gap-2">
+                <span className="text-[10px] font-black text-zinc-400 dark:text-zinc-500 uppercase">ফটো রেশিও ও ক্রপ সাইজ নির্ধারণ করুন</span>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedAspect('original');
+                      applyImageAspect(originalFileResult, 'original');
+                    }}
+                    className={`py-2 px-1 rounded-xl text-[10px] font-black border transition ${
+                      selectedAspect === 'original'
+                        ? 'border-amber-500 bg-amber-500/10 text-amber-600'
+                        : 'bg-white dark:bg-zinc-900 border-neutral-200 dark:border-neutral-800 text-slate-500'
+                    }`}
+                  >
+                    মূল সাইজ (ফিট)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedAspect('1_1');
+                      applyImageAspect(originalFileResult, '1_1');
+                    }}
+                    className={`py-2 px-1 rounded-xl text-[10px] font-black border transition ${
+                      selectedAspect === '1_1'
+                        ? 'border-amber-500 bg-amber-500/10 text-amber-600'
+                        : 'bg-white dark:bg-zinc-900 border-neutral-200 dark:border-neutral-800 text-slate-500'
+                    }`}
+                  >
+                    ১:১ স্কয়ার
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedAspect('16_9');
+                      applyImageAspect(originalFileResult, '16_9');
+                    }}
+                    className={`py-2 px-1 rounded-xl text-[10px] font-black border transition ${
+                      selectedAspect === '16_9'
+                        ? 'border-amber-500 bg-amber-500/10 text-amber-600'
+                        : 'bg-white dark:bg-zinc-900 border-neutral-200 dark:border-neutral-800 text-slate-500'
+                    }`}
+                  >
+                    ১৬:৯ ওয়াইড
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedAspect('9_16');
+                      applyImageAspect(originalFileResult, '9_16');
+                    }}
+                    className={`py-2 px-1 rounded-xl text-[10px] font-black border transition ${
+                      selectedAspect === '9_16'
+                        ? 'border-amber-500 bg-amber-500/10 text-amber-600'
+                        : 'bg-white dark:bg-zinc-900 border-neutral-200 dark:border-neutral-800 text-slate-500'
+                    }`}
+                  >
+                    ৯:১৬ পোর্ট্রেট
+                  </button>
+                </div>
+              </div>
             )}
-            <button
-              type="button"
-              onClick={() => {
-                setMediaUrl('');
-                setMediaType('none');
-              }}
-              className="absolute top-2.5 right-2.5 bg-black/60 text-white p-2 rounded-full hover:bg-black transition"
-            >
-              <X className="w-3.5 h-3.5" />
-            </button>
           </div>
         ) : (
           <div className="rounded-2xl border-2 border-dashed border-amber-300 dark:border-amber-800 bg-amber-50/5 dark:bg-zinc-950/20 p-8 text-center flex flex-col items-center justify-center space-y-3.5 select-none">
@@ -282,60 +397,21 @@ export default function CreatePostView({ onClose, onPostCreated }: CreatePostVie
               <ImageIcon className="w-8 h-8" />
             </div>
             <div className="space-y-1">
-              <span className="text-sm font-bold text-slate-800 dark:text-neutral-200 block">আপনার ডিভাইস থেকে ফটো/ভিডিও আপলোড করুন</span>
-              <p className="text-[10px] text-zinc-400">অথবা নিচের গ্যালারি থেকে চমৎকার একটি রেডি স্যাম্পল সিলেক্ট করুন</p>
+              <span className="text-sm font-bold text-slate-800 dark:text-neutral-200 block">আপনার ডিভাইস থেকে ফটো আপলোড করুন</span>
+              <p className="text-[10px] text-zinc-400">সহজেই সিলেক্ট করে আপলোড সম্পন্ন করুন</p>
             </div>
             
             <label className="mt-1 bg-amber-500 hover:bg-amber-600 active:bg-amber-700 text-white font-black text-xs py-2 px-5 rounded-full cursor-pointer hover:scale-105 active:scale-95 transition flex items-center gap-1.5 shadow-sm">
-              <span>ফাইল নির্বাচন করুন 📤</span>
+              <span>ফটো নির্বাচন করুন 📤</span>
               <input
                 type="file"
-                accept="image/*,video/*"
+                accept="image/*"
                 onChange={handleFileChange}
                 className="hidden"
               />
             </label>
           </div>
         )}
-
-        {/* Preset Gallery Selector Options */}
-        <div className="space-y-2.5">
-          <label className="text-[10.5px] font-black text-zinc-400 uppercase tracking-widest pl-1">ফটো গ্যালারি স্যাম্পলস</label>
-          <div className="flex gap-2 overflow-x-auto pb-1.5 scrollbar-thin">
-            {PRESET_IMAGES.map((img, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => selectPresetMedia('image', img.url)}
-                className={`px-3 py-2 text-xs font-bold rounded-xl border transition cursor-pointer ${
-                  mediaUrl === img.url
-                    ? 'border-amber-500 bg-amber-500/10 text-amber-600'
-                    : 'bg-white border-neutral-200 text-slate-650'
-                }`}
-              >
-                {img.name}
-              </button>
-            ))}
-          </div>
-
-          <label className="text-[10.5px] font-black text-zinc-400 uppercase tracking-widest pl-1 block">ভিডিও স্যাম্পলস</label>
-          <div className="flex gap-2 overflow-x-auto pb-1 scrollbar-thin">
-            {PRESET_VIDEOS.map((vid, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => selectPresetMedia('video', vid.url)}
-                className={`px-3 py-2 text-xs font-bold rounded-xl border transition cursor-pointer ${
-                  mediaUrl === vid.url
-                    ? 'border-amber-500 bg-amber-500/10 text-amber-600'
-                    : 'bg-white border-neutral-200 text-slate-650'
-                }`}
-              >
-                {vid.name}
-              </button>
-            ))}
-          </div>
-        </div>
 
         {/* Dropdown for Category selection */}
         <div className="space-y-1.5">

@@ -153,6 +153,49 @@ export default function WalletView({ onBack, onNavigate }: WalletViewProps) {
           </div>
         </div>
 
+        {/* Referral Status Card */}
+        <div className="bg-white dark:bg-neutral-900 border border-neutral-100 dark:border-neutral-800 rounded-[24px] p-5 shadow-sm space-y-4">
+          <div className="flex justify-between items-center">
+            <h2 className="text-xs font-black text-zinc-400 uppercase tracking-widest flex items-center gap-1">
+              <Gift className="w-4 h-4 text-amber-500 animate-pulse" />
+              <span>রেফারেল ও আয় প্রোগ্রাম</span>
+            </h2>
+            <span className="text-[10px] bg-emerald-50 text-emerald-650 font-bold px-2 py-0.5 rounded-full">সক্রিয়</span>
+          </div>
+
+          <div className="p-4 bg-slate-50 dark:bg-zinc-950 border border-neutral-200/50 rounded-2xl flex flex-col items-center text-center space-y-2">
+            <span className="text-[11px] text-zinc-500 font-medium">আপনার ইউনিক রেফারেল কোড</span>
+            <div className="bg-white dark:bg-zinc-900 border border-neutral-250 px-4 py-2 rounded-xl text-sm font-mono font-black text-amber-600 tracking-wider flex items-center gap-2">
+              <span>{profile.referralCode || profile.username}</span>
+              <button 
+                onClick={() => {
+                  navigator.clipboard.writeText(profile.referralCode || profile.username);
+                  alert('রেফার কোড সফলভাবে কপি করা হয়েছে! 📋✈️');
+                }}
+                className="text-[10px] bg-amber-50 px-2.5 py-1 rounded-lg text-amber-700 font-sans font-black cursor-pointer hover:bg-amber-100 transition-colors"
+              >
+                কপি
+              </button>
+            </div>
+            <p className="text-[10px] text-zinc-400 mt-1">এই কোড ব্যবহার করে বন্ধুরা জয়েন করলে আপনি পাবেন ফ্রি স্টার!</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4 border-t border-neutral-100 dark:border-neutral-800 pt-4">
+            <div>
+              <span className="text-[10px] font-bold text-zinc-400 block uppercase">মোট সফল রেফার</span>
+              <span className="text-base font-black text-slate-800 dark:text-zinc-200 block mt-1">
+                {profile.referralsCount || 0} জন মেম্বার
+              </span>
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-zinc-400 block uppercase">রেফারেল বোনাস লাভ</span>
+              <span className="text-base font-black text-amber-500 block mt-1">
+                ⭐ {profile.totalReferralBonus || 0} স্টারস
+              </span>
+            </div>
+          </div>
+        </div>
+
         {/* Dynamic Transaction history list row */}
         <div className="space-y-3">
           <h2 className="text-xs font-black text-zinc-400 uppercase tracking-widest pl-1">লেনদেনের ইতিহাস (Transaction History)</h2>

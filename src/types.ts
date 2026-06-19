@@ -51,6 +51,18 @@ export interface UserProfile {
   totalStarsEarned: number; // For creators
   totalStarsSpent: number; // For users
   pendingBalanceStars: number; // Locked/pending stars (withdrawable)
+
+  // Referral system
+  referralCode?: string; // Personal referral code
+  referredBy?: string; // ID of the user who referred this user
+  referralsCount?: number; // Count of successful referrals
+  totalReferralBonus?: number; // Total stars earned from referrals
+}
+
+export interface ReferralSettings {
+  isEnabled: boolean;
+  signupBonusStars: number; // default stars credited to referrer on referee signup
+  purchaseCommissionPercent: number; // % of stars credited to referrer when referee buys stars
 }
 
 export interface Post {

@@ -69,7 +69,7 @@ export default function SettingsView({ onBack, onNavigate, onLogout }: SettingsV
         <div className="bg-amber-500/5 dark:bg-amber-950/20 rounded-2xl p-4 shadow-sm border border-amber-500/10 space-y-4">
           
           <button
-            onClick={() => onNavigate('CREATE_POST')} // Route to Edit/Navigation
+            onClick={() => onNavigate('EDIT_PROFILE')} // Route to Edit/Navigation
             className="w-full flex items-center justify-between p-3.5 bg-white dark:bg-neutral-900 rounded-xl hover:shadow-md transition text-left group"
           >
             <div className="flex items-center gap-3">

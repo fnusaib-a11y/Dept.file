@@ -31,6 +31,7 @@ export default function FeedView({ onNavigate, onUserSelect, onMessageUser }: Fe
   // Custom states for story interaction
   const [activeStory, setActiveStory] = React.useState<Story | null>(null);
   const [storyTimer, setStoryTimer] = React.useState(0);
+  const storyInputRef = React.useRef<HTMLInputElement | null>(null);
 
   // Custom states for post options/reports
   const [selectedPostOptions, setSelectedPostOptions] = React.useState<Post | null>(null);
@@ -78,23 +79,46 @@ export default function FeedView({ onNavigate, onUserSelect, onMessageUser }: Fe
     };
   }, [activeCategory, activeCommentsPost]);
 
+  // Derived active user's stories
+  const activeUserStories = React.useMemo(() => {
+    if (!activeStory) return [];
+    return stories.filter(s => s.userId === activeStory.userId);
+  }, [activeStory, stories]);
+
+  // Unique list of first story per user for the horizontal top bar list
+  const uniqueUserStoriesMap = React.useMemo(() => {
+    const map = new Map<string, Story>();
+    stories.forEach(s => {
+      if (myProfile && s.userId === myProfile.id) return;
+      if (!map.has(s.userId)) {
+        map.set(s.userId, s);
+      }
+    });
+    return Array.from(map.values());
+  }, [stories, myProfile]);
+
+  const myStories = React.useMemo(() => {
+    if (!myProfile) return [];
+    return stories.filter(s => s.userId === myProfile.id);
+  }, [stories, myProfile]);
+
   // Story Auto-Advance Timer controller
   const handleNextStory = React.useCallback(() => {
-    if (!activeStory) return;
-    const currentIndex = stories.findIndex(s => s.id === activeStory.id);
-    if (currentIndex !== -1 && currentIndex < stories.length - 1) {
-      setActiveStory(stories[currentIndex + 1]);
+    if (!activeStory || activeUserStories.length === 0) return;
+    const currentIndex = activeUserStories.findIndex(s => s.id === activeStory.id);
+    if (currentIndex !== -1 && currentIndex < activeUserStories.length - 1) {
+      setActiveStory(activeUserStories[currentIndex + 1]);
       setStoryTimer(0);
     } else {
       setActiveStory(null);
     }
-  }, [activeStory, stories]);
+  }, [activeStory, activeUserStories]);
 
   const handlePrevStory = () => {
-    if (!activeStory) return;
-    const currentIndex = stories.findIndex(s => s.id === activeStory.id);
+    if (!activeStory || activeUserStories.length === 0) return;
+    const currentIndex = activeUserStories.findIndex(s => s.id === activeStory.id);
     if (currentIndex > 0) {
-      setActiveStory(stories[currentIndex - 1]);
+      setActiveStory(activeUserStories[currentIndex - 1]);
       setStoryTimer(0);
     }
   };
@@ -125,16 +149,58 @@ export default function FeedView({ onNavigate, onUserSelect, onMessageUser }: Fe
     setStoryTimer(0);
   };
 
-  const handleCreateMockStory = () => {
-    const urls = [
-      'https://images.unsplash.com/photo-1517841905240-472988babdf9?auto=format&fit=crop&w=600&q=80',
-      'https://images.unsplash.com/photo-1507525428034-b723cf961d3e?auto=format&fit=crop&w=600&q=80',
-      'https://images.unsplash.com/photo-1475924156734-496f6cac6ec1?auto=format&fit=crop&w=600&q=80'
-    ];
-    const picked = urls[Math.floor(Math.random() * urls.length)];
-    dbService.addStory(picked);
-    loadFeedData();
-    alert('নতুন স্টোরি সফলভাবে যুক্ত করা হয়েছে! 📸');
+  const triggerStoryUpload = () => {
+    storyInputRef.current?.click();
+  };
+
+  const handleStoryFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 15 * 1024 * 1024) {
+      alert('সতর্কতা: অনুগ্রহ করে ১৫ মেগাবাইটের কম সাইজের ছবি সিলেক্ট করুন।');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let width = img.width;
+        let height = img.height;
+
+        // Resize maximum dimension to 720px for fast loading and low storage footprint
+        const maxDim = 720;
+        if (width > maxDim || height > maxDim) {
+          if (width > height) {
+            height = Math.round((height * maxDim) / width);
+            width = maxDim;
+          } else {
+            width = Math.round((width * maxDim) / height);
+            height = maxDim;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0, width, height);
+          const compressedBase64 = canvas.toDataURL('image/jpeg', 0.55); // 55% quality compression
+          dbService.addStory(compressedBase64);
+          loadFeedData();
+          alert('আপনার স্টোরিটি সফলভাবে যুক্ত করা হয়েছে! 📸');
+        } else {
+          dbService.addStory(event.target?.result as string);
+          loadFeedData();
+          alert('আপনার স্টোরিটি সফলভাবে যুক্ত করা হয়েছে! 📸');
+        }
+      };
+    };
+    reader.readAsDataURL(file);
+    e.target.value = ''; // clear input cache
   };
 
   const handleToggleLike = (postId: string) => {
@@ -379,29 +445,116 @@ export default function FeedView({ onNavigate, onUserSelect, onMessageUser }: Fe
       )}
 
       {/* ------------------------- */}
-      {/* Stories Slide panel      */}
+      {/* Stories Slide panel (Facebook Style) */}
       {/* ------------------------- */}
-      <div className="bg-white dark:bg-neutral-900 py-3.5 px-4 border-b border-neutral-100 dark:border-neutral-800 flex gap-4 overflow-x-auto scrollbar-none z-10 select-none shrink-0">
-        {/* Your Story trigger */}
-        <div className="flex flex-col items-center shrink-0 cursor-pointer" onClick={handleCreateMockStory}>
-          <div className="relative">
-            <div className="w-14 h-14 rounded-full overflow-hidden border-2 border-amber-500 p-0.5 bg-white">
+      <div className="bg-white dark:bg-neutral-900 py-3.5 px-4 border-b border-neutral-100 dark:border-neutral-800 flex gap-3 overflow-x-auto scrollbar-none z-10 select-none shrink-0">
+        {/* Your Story trigger (Facebook Style dynamic check) */}
+        {myStories.length > 0 ? (
+          <div 
+            className="relative w-24 h-36 rounded-2xl overflow-hidden shrink-0 cursor-pointer shadow-sm group hover:scale-[1.02] active:scale-98 transition-all duration-300 border border-amber-500 bg-slate-100"
+            onClick={() => viewStory(myStories[0])}
+          >
+            {/* Background Story Thumbnail */}
+            <img 
+              src={myStories[0].mediaUrl} 
+              alt="" 
+              className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
+            />
+            {/* Gradient overlays to guarantee high contrast */}
+            <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/75 z-0" />
+
+            {/* Profile avatar overlay with a mini '+' badge */}
+            <div 
+              className="absolute top-2.5 left-2.5 z-10 w-7 h-7 rounded-full overflow-hidden border-2 border-white p-0.5 bg-amber-500 shadow-md"
+              onClick={(e) => {
+                e.stopPropagation();
+                triggerStoryUpload();
+              }}
+              title="নতুন স্টোরি দিন"
+            >
               <img src={myProfile.avatarUrl} alt="" className="w-full h-full object-cover rounded-full" />
             </div>
-            <div className="absolute right-0 bottom-0 bg-amber-500 text-white rounded-full w-5 h-5 border-2 border-white flex items-center justify-center font-black text-xs shadow-md">
+
+            {/* Plus icon on top-right to directly add story */}
+            <div 
+              className="absolute top-2.5 right-2.5 rounded-full w-6 h-6 bg-amber-500 hover:bg-amber-600 border border-white flex items-center justify-center text-white font-extrabold text-xs shadow-md z-10 hover:scale-110 active:scale-95 transition-all"
+              onClick={(e) => {
+                e.stopPropagation();
+                triggerStoryUpload();
+              }}
+              title="নতুন স্টোরি দিন"
+            >
               +
             </div>
+
+            {/* Bottom aligned label */}
+            <span className="absolute bottom-2 left-2 right-2 z-10 text-[9.5px] font-black text-white truncate drop-shadow-sm leading-tight text-left">
+              আপনার স্টোরি
+            </span>
+
+            <input
+              type="file"
+              ref={storyInputRef}
+              onChange={handleStoryFileChange}
+              accept="image/*"
+              className="hidden"
+            />
           </div>
-          <span className="text-[9.5px] font-bold text-slate-600 mt-1">স্টোরি দিন</span>
-        </div>
+        ) : (
+          <div 
+            className="relative w-24 h-36 rounded-2xl overflow-hidden shrink-0 cursor-pointer bg-slate-50 dark:bg-zinc-800/50 border border-neutral-200/50 dark:border-neutral-850 flex flex-col shadow-sm group hover:border-amber-500 transition-all duration-300" 
+            onClick={triggerStoryUpload}
+          >
+            {/* Cover image area */}
+            <div className="relative w-full h-[68%] overflow-hidden bg-slate-100 dark:bg-zinc-800">
+              <img 
+                src={myProfile.avatarUrl} 
+                alt="" 
+                className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" 
+              />
+            </div>
+            {/* Label area */}
+            <div className="relative w-full h-[32%] bg-white dark:bg-neutral-900 flex flex-col items-center justify-center">
+              {/* Overlapping circular plus button */}
+              <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 bg-amber-500 text-white rounded-full w-7 h-7 border-2 border-white dark:border-neutral-900 flex items-center justify-center shadow-md font-bold text-base group-hover:scale-110 active:scale-95 transition-all">
+                +
+              </div>
+              <span className="text-[10px] font-black text-slate-700 dark:text-neutral-300 mt-2">স্টোরি দিন</span>
+            </div>
+
+            <input
+              type="file"
+              ref={storyInputRef}
+              onChange={handleStoryFileChange}
+              accept="image/*"
+              className="hidden"
+            />
+          </div>
+        )}
 
         {/* Other Users Stories */}
-        {stories.map((story) => (
-          <div key={story.id} className="flex flex-col items-center shrink-0 cursor-pointer text-center" onClick={() => viewStory(story)}>
-            <div className="w-14 h-14 rounded-full overflow-hidden border border-amber-500 p-0.5 bg-white animate-pulse">
+        {uniqueUserStoriesMap.map((story) => (
+          <div 
+            key={story.id} 
+            className="relative w-24 h-36 rounded-2xl overflow-hidden shrink-0 cursor-pointer shadow-sm group hover:scale-[1.02] active:scale-98 transition-all duration-300 border border-neutral-100 dark:border-neutral-800" 
+            onClick={() => viewStory(story)}
+          >
+            {/* Background Story Thumbnail */}
+            <img 
+              src={story.mediaUrl} 
+              alt="" 
+              className="absolute inset-0 w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
+            />
+            {/* Gradient overlays to guarantee high contrast */}
+            <div className="absolute inset-0 bg-gradient-to-b from-black/40 via-transparent to-black/75 z-0" />
+
+            {/* User circular avatar overlaid on top-left of the story thumbnail */}
+            <div className="absolute top-2.5 left-2.5 z-10 w-7 h-7 rounded-full overflow-hidden border-2 border-amber-500 p-0.5 bg-white shadow-md">
               <img src={story.userAvatarUrl} alt="" className="w-full h-full object-cover rounded-full" />
             </div>
-            <span className="text-[9.5px] font-bold text-slate-600 mt-1 truncate w-14">
+
+            {/* Bottom aligned user name */}
+            <span className="absolute bottom-2 left-2 right-2 z-10 text-[9.5px] font-black text-white truncate drop-shadow-sm leading-tight text-left">
               {story.userName}
             </span>
           </div>
@@ -508,24 +661,26 @@ export default function FeedView({ onNavigate, onUserSelect, onMessageUser }: Fe
 
                 {/* PREMIUM LOCK/UNLOCK INTERFACES */}
                 {post.mediaUrl && (
-                  <div className="relative rounded-2xl overflow-hidden aspect-video bg-neutral-900 border border-neutral-200">
+                  <div className={`relative rounded-2xl overflow-hidden bg-neutral-900 border border-neutral-200 dark:border-neutral-800 flex items-center justify-center ${
+                    isUnlocked ? 'w-full max-h-[600px]' : 'aspect-video w-full'
+                  }`}>
                     {isUnlocked ? (
                       /* Rendering standard unlocked media content */
                       post.mediaType === 'image' ? (
                         <img
                           src={post.mediaUrl}
                           alt="Unlocked attachment"
-                          className="w-full h-full object-cover"
+                          className="w-full h-auto max-h-[600px] object-contain"
                           loading="lazy"
                         />
                       ) : (
-                        <div className="w-full h-full bg-black select-all">
-                          <video src={post.mediaUrl} controls playsInline className="w-full h-full object-cover" />
+                        <div className="w-full max-h-[600px] bg-black flex items-center justify-center">
+                          <video src={post.mediaUrl} controls playsInline className="w-full h-auto max-h-[600px] object-contain" />
                         </div>
                       )
                     ) : (
                       /* Display LOCKED dynamic cover layout */
-                      <div className="absolute inset-0 bg-zinc-950/90 flex flex-col justify-center items-center text-center p-5 space-y-4">
+                      <div className="absolute inset-0 bg-zinc-950/90 flex flex-col justify-center items-center text-center p-5 space-y-4 w-full h-full">
                         {/* Blurred sample image backdrop */}
                         <div className="absolute inset-0 pointer-events-none opacity-20 filter blur-lg scale-105">
                           <img src={post.mediaUrl} alt="" className="w-full h-full object-cover" />
@@ -623,8 +778,8 @@ export default function FeedView({ onNavigate, onUserSelect, onMessageUser }: Fe
           <div className="relative z-10 flex flex-col h-full justify-between">
             {/* Story Timer progress indicator */}
             <div className="w-full h-1 bg-neutral-800/80 rounded-full overflow-hidden flex gap-1">
-              {stories.map((s, idx) => {
-                const currentStoryIndex = stories.findIndex(st => st.id === activeStory.id);
+              {activeUserStories.map((s, idx) => {
+                const currentStoryIndex = activeUserStories.findIndex(st => st.id === activeStory.id);
                 let w = 0;
                 if (idx < currentStoryIndex) w = 100;
                 else if (idx === currentStoryIndex) w = storyTimer;
