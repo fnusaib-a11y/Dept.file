@@ -136,8 +136,7 @@ export default function ChatView({ onBack, selectedUserId, onClearSelectedUser }
     e.preventDefault();
     if (!newMessageText.trim() || !activePartner) return;
 
-    const sent = dbService.sendMessage(activePartner.id, newMessageText);
-    setMessages(prev => [...prev, sent]);
+    dbService.sendMessage(activePartner.id, newMessageText);
     setNewMessageText('');
     
     // Refresh chats in panel lists
@@ -344,7 +343,7 @@ export default function ChatView({ onBack, selectedUserId, onClearSelectedUser }
 
           {/* Chat Messages Log */}
           <div className="flex-1 overflow-y-auto px-4 py-5 space-y-4">
-            {messages.map((msg) => {
+            {messages.filter((m, idx, self) => self.findIndex(msg => msg.id === m.id) === idx).map((msg) => {
               const isMe = msg.senderId === me.id;
               return (
                 <div key={msg.id} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>

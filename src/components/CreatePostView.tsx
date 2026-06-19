@@ -15,7 +15,7 @@ interface CreatePostViewProps {
 export default function CreatePostView({ onClose, onPostCreated }: CreatePostViewProps) {
   const [title, setTitle] = React.useState('');
   const [content, setContent] = React.useState('');
-  const [category, setCategory] = React.useState('বিনোদন');
+  const [category, setCategory] = React.useState('সাধারণ');
   const [isPremium, setIsPremium] = React.useState(false);
   const [starPrice, setStarPrice] = React.useState('50');
   
@@ -176,9 +176,6 @@ export default function CreatePostView({ onClose, onPostCreated }: CreatePostVie
   const selectPresetMedia = (type: 'image' | 'video', url: string) => {
     setMediaType(type);
     setMediaUrl(url);
-    if (type === 'video') {
-      setCategory('বিনোদন');
-    }
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -413,20 +410,7 @@ export default function CreatePostView({ onClose, onPostCreated }: CreatePostVie
           </div>
         )}
 
-        {/* Dropdown for Category selection */}
-        <div className="space-y-1.5">
-          <label className="text-xs font-black text-zinc-450 uppercase block pl-1">ফটোগ্রাফি ক্যাটাগরি</label>
-          <select
-            value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            className="w-full bg-white border border-neutral-250 rounded-xl px-4 py-3 text-xs font-bold shadow-sm"
-          >
-            <option value="বিনোদন">বিনোদন (Entertainment)</option>
-            <option value="গ্ল্যামার">গ্ল্যামার (Glamour)</option>
-            <option value="আর্ট">আর্ট (Arts)</option>
-            <option value="লাইফস্টাইল">লাইফস্টাইল (Lifestyle)</option>
-          </select>
-        </div>
+
 
         {/* Creator Premium Lock configuration options */}
         <div className="bg-white rounded-[24px] p-5 border border-neutral-150 space-y-4">

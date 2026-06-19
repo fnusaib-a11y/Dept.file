@@ -152,7 +152,7 @@ export interface NotificationItem {
   senderId: string;
   senderName: string;
   senderAvatarUrl: string;
-  type: 'like' | 'comment' | 'follow' | 'message' | 'premium' | 'stars_received' | 'withdrawal_update' | 'kyc_update';
+  type: 'like' | 'comment' | 'follow' | 'message' | 'premium' | 'stars_received' | 'withdrawal_update' | 'kyc_update' | 'friend_request' | 'friend_accept';
   postId?: string;
   text: string;
   isRead: boolean;
@@ -189,3 +189,14 @@ export interface TransactionItem {
   status: 'pending' | 'completed' | 'failed';
   createdAt: string;
 }
+
+export interface FriendRequest {
+  id: string;
+  senderId: string;
+  senderName: string;
+  senderAvatarUrl: string;
+  receiverId: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt: string;
+}
+

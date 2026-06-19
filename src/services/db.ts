@@ -16,7 +16,8 @@ import {
   StarPackage, 
   WithdrawalRequest, 
   TransactionItem,
-  ReferralSettings
+  ReferralSettings,
+  FriendRequest
 } from '../types';
 
 import { initializeApp } from 'firebase/app';
@@ -29,7 +30,8 @@ import {
   getDocs,
   collection, 
   onSnapshot, 
-  Firestore 
+  Firestore,
+  deleteDoc
 } from 'firebase/firestore';
 
 import firebaseConfig from '../../firebase-applet-config.json';
@@ -47,6 +49,7 @@ const STORAGE_KEYS = {
   WITHDRAWALS: 'starconnect_withdrawals_db',
   TRANSACTIONS: 'starconnect_transactions_db',
   REFERRAL_SETTINGS: 'starconnect_referral_settings',
+  FRIEND_REQUESTS: 'starconnect_friend_requests_db',
 };
 
 // Standard Star Packages
@@ -104,6 +107,7 @@ const BOOTSTRAP_DATA = {
   withdrawals: [] as WithdrawalRequest[],
 
   transactions: [] as TransactionItem[],
+  friendRequests: [] as FriendRequest[],
 
   referralSettings: {
     isEnabled: true,
@@ -117,6 +121,11 @@ class StarConnectDatabaseService {
   private db: Firestore | null = null;
   private isFirebaseReady = false;
   public firebaseAuthError: string | null = null;
+
+  private cleanForFirestore<T>(obj: T): T {
+    if (obj === undefined || obj === null) return obj;
+    return JSON.parse(JSON.stringify(obj)) as T;
+  }
 
   constructor() {
     this.cache = this.loadFromStorage();
@@ -164,7 +173,7 @@ class StarConnectDatabaseService {
           
           // Push profile record so it exists in Firebase Users database under their stable target ID
           if (me && this.db) {
-            setDoc(doc(this.db, 'users', me.id), me).catch(console.warn);
+            setDoc(doc(this.db, 'users', me.id), this.cleanForFirestore(me)).catch(console.warn);
           }
           
           // Run background sync for posts and updates
@@ -177,6 +186,63 @@ class StarConnectDatabaseService {
     } catch (e) {
       console.warn("Operating in local database model fallback.", e);
     }
+  }
+
+  private rebuildChatsFromMessages() {
+    const me = this.cache.currentUser;
+    if (!me) return;
+
+    // Group messages by chatId
+    const chatMap = new Map<string, Message[]>();
+    this.cache.messages.forEach(m => {
+      if (!chatMap.has(m.chatId)) {
+        chatMap.set(m.chatId, []);
+      }
+      chatMap.get(m.chatId)!.push(m);
+    });
+
+    chatMap.forEach((msgs, chatId) => {
+      if (msgs.length === 0) return;
+      const first = msgs[0];
+      const participants = [first.senderId, first.receiverId];
+      if (!participants.includes(me.id)) return; // not our chat
+
+      // Sort messages by date
+      msgs.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      const lastMsg = msgs[msgs.length - 1];
+
+      // Calculate unread count for us
+      const unreadCount: { [userId: string]: number } = {};
+      participants.forEach(pId => {
+        unreadCount[pId] = 0;
+      });
+      msgs.forEach(m => {
+        if (!m.isRead) {
+          unreadCount[m.receiverId] = (unreadCount[m.receiverId] || 0) + 1;
+        }
+      });
+
+      // Check if existing
+      const existingIdx = this.cache.chats.findIndex(c => c.id === chatId);
+      const isPaidChatEnabled = this.cache.chats[existingIdx]?.isPaidChatEnabled || false;
+      const starRatePerMessage = this.cache.chats[existingIdx]?.starRatePerMessage || 0;
+
+      const chatObj = {
+        id: chatId,
+        participants,
+        lastMessage: lastMsg.mediaType === 'star_gift' ? `🎁 ${lastMsg.starGiftAmount} Stars Gift!` : lastMsg.content,
+        lastMessageAt: lastMsg.createdAt,
+        unreadCount,
+        isPaidChatEnabled,
+        starRatePerMessage
+      };
+
+      if (existingIdx !== -1) {
+        this.cache.chats[existingIdx] = chatObj;
+      } else {
+        this.cache.chats.push(chatObj);
+      }
+    });
   }
 
   private async syncFromFirestore() {
@@ -206,8 +272,133 @@ class StarConnectDatabaseService {
         }
       });
 
+      // Sync Follows
+      try {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith('follow_')) {
+            localStorage.setItem(key, 'false');
+          }
+        }
+        const followsSnap = await getDocs(collection(this.db, 'follows'));
+        followsSnap.forEach(d => {
+          const f = d.data();
+          if (f.id && f.followerId && f.followingId) {
+            localStorage.setItem(`follow_${f.followerId}_${f.followingId}`, 'true');
+          }
+        });
+      } catch (err) {
+        console.warn("Follows catchup issue:", err);
+      }
+
+      // Sync Messages
+      try {
+        const messagesSnap = await getDocs(collection(this.db, 'messages'));
+        const fetchedMessages: Message[] = [];
+        messagesSnap.forEach(d => {
+          const m = d.data() as Message;
+          fetchedMessages.push(m);
+        });
+        if (fetchedMessages.length > 0) {
+          const combined = [...this.cache.messages, ...fetchedMessages];
+          const uniqueMap = new Map<string, Message>();
+          combined.forEach(m => uniqueMap.set(m.id, m));
+          this.cache.messages = Array.from(uniqueMap.values());
+        }
+      } catch (err) {
+        console.warn("Messages catchup issue:", err);
+      }
+
+      // Sync Friend Requests
+      try {
+        const frSnap = await getDocs(collection(this.db, 'friend_requests'));
+        const fetchedFRs: FriendRequest[] = [];
+        frSnap.forEach(d => {
+          fetchedFRs.push(d.data() as FriendRequest);
+        });
+        if (fetchedFRs.length > 0) {
+          const combined = [...this.cache.friendRequests, ...fetchedFRs];
+          const uniqueMap = new Map<string, FriendRequest>();
+          combined.forEach(m => uniqueMap.set(m.id, m));
+          this.cache.friendRequests = Array.from(uniqueMap.values());
+        }
+      } catch (err) {
+        console.warn("Friend requests catchup issue:", err);
+      }
+
+      this.rebuildChatsFromMessages();
       this.sync();
       window.dispatchEvent(new CustomEvent('starconnect_db_update'));
+
+      // Set up real-time snapshot listeners for friend requests
+      onSnapshot(collection(this.db, 'friend_requests'), (snapshot) => {
+        const updatedFRs: FriendRequest[] = [];
+        snapshot.forEach(doc => {
+          updatedFRs.push(doc.data() as FriendRequest);
+        });
+        if (updatedFRs.length > 0) {
+          const combined = [...this.cache.friendRequests, ...updatedFRs];
+          const uniqueMap = new Map<string, FriendRequest>();
+          combined.forEach(fr => uniqueMap.set(fr.id, fr));
+          this.cache.friendRequests = Array.from(uniqueMap.values());
+          this.sync();
+          window.dispatchEvent(new CustomEvent('starconnect_db_update'));
+        }
+      });
+
+      // Set up real-time snapshot listeners for messages so chat is responsive and fast
+      onSnapshot(collection(this.db, 'messages'), (snapshot) => {
+        const updatedMsgs: Message[] = [];
+        snapshot.forEach(doc => {
+          updatedMsgs.push(doc.data() as Message);
+        });
+        if (updatedMsgs.length > 0) {
+          const combined = [...this.cache.messages, ...updatedMsgs];
+          const uniqueMap = new Map<string, Message>();
+          combined.forEach(m => uniqueMap.set(m.id, m));
+          this.cache.messages = Array.from(uniqueMap.values());
+          this.rebuildChatsFromMessages();
+          this.sync();
+          window.dispatchEvent(new CustomEvent('starconnect_db_update'));
+        }
+      });
+
+      // Set up real-time snapshot listeners for follows to keep following values accurate
+      onSnapshot(collection(this.db, 'follows'), (snapshot) => {
+        for (let i = 0; i < localStorage.length; i++) {
+          const key = localStorage.key(i);
+          if (key && key.startsWith('follow_')) {
+            localStorage.setItem(key, 'false');
+          }
+        }
+        snapshot.forEach(doc => {
+          const f = doc.data();
+          if (f.followerId && f.followingId) {
+            localStorage.setItem(`follow_${f.followerId}_${f.followingId}`, 'true');
+          }
+        });
+        this.sync();
+        window.dispatchEvent(new CustomEvent('starconnect_db_update'));
+      });
+
+      // Set up real-time snapshot listeners for users to get live updates of follow counts/stars/verifications
+      onSnapshot(collection(this.db, 'users'), (snapshot) => {
+        snapshot.forEach(doc => {
+          const u = doc.data() as UserProfile;
+          const idx = this.cache.users.findIndex(item => item.id === u.id);
+          if (idx !== -1) {
+            this.cache.users[idx] = { ...this.cache.users[idx], ...u };
+          } else {
+            this.cache.users.push(u);
+          }
+          if (this.cache.currentUser && u.id === this.cache.currentUser.id) {
+            this.cache.currentUser = { ...this.cache.currentUser, ...u };
+          }
+        });
+        this.sync();
+        window.dispatchEvent(new CustomEvent('starconnect_db_update'));
+      });
+
     } catch (err) {
       console.warn("Error running Firestore collections catchup:", err);
     }
@@ -253,7 +444,8 @@ class StarConnectDatabaseService {
       const withdrawals = localStorage.getItem(STORAGE_KEYS.WITHDRAWALS);
       const transactions = localStorage.getItem(STORAGE_KEYS.TRANSACTIONS);
       const referralSettings = localStorage.getItem(STORAGE_KEYS.REFERRAL_SETTINGS);
-
+      const friendRequests = localStorage.getItem(STORAGE_KEYS.FRIEND_REQUESTS);
+ 
       data.currentUser = uCurrent && uCurrent !== 'null' ? JSON.parse(uCurrent) : null;
       data.users = uAll ? JSON.parse(uAll) : BOOTSTRAP_DATA.users;
       data.posts = posts ? JSON.parse(posts) : BOOTSTRAP_DATA.posts;
@@ -266,6 +458,7 @@ class StarConnectDatabaseService {
       data.withdrawals = withdrawals ? JSON.parse(withdrawals) : BOOTSTRAP_DATA.withdrawals;
       data.transactions = transactions ? JSON.parse(transactions) : BOOTSTRAP_DATA.transactions;
       data.referralSettings = referralSettings ? JSON.parse(referralSettings) : BOOTSTRAP_DATA.referralSettings;
+      data.friendRequests = friendRequests ? JSON.parse(friendRequests) : BOOTSTRAP_DATA.friendRequests;
       
       if (!uCurrent) this.saveToStorage(data);
       return data as typeof BOOTSTRAP_DATA;
@@ -292,6 +485,7 @@ class StarConnectDatabaseService {
       localStorage.setItem(STORAGE_KEYS.WITHDRAWALS, JSON.stringify(data.withdrawals));
       localStorage.setItem(STORAGE_KEYS.TRANSACTIONS, JSON.stringify(data.transactions));
       localStorage.setItem(STORAGE_KEYS.REFERRAL_SETTINGS, JSON.stringify(data.referralSettings));
+      localStorage.setItem(STORAGE_KEYS.FRIEND_REQUESTS, JSON.stringify(data.friendRequests));
     } catch (e: any) {
       console.error("[Storage Quota Info] Local storage exceeded 5MB limit or threw an exception:", e);
       if (e.name === 'QuotaExceededError' || e.code === 22) {
@@ -422,7 +616,7 @@ class StarConnectDatabaseService {
 
       // Save updated referrer to Firestore if online
       if (this.isFirebaseReady && this.db) {
-        setDoc(doc(this.db, 'users', referredByUser.id), referredByUser).catch(console.warn);
+        setDoc(doc(this.db, 'users', referredByUser.id), this.cleanForFirestore(referredByUser)).catch(console.warn);
       }
     }
 
@@ -432,7 +626,7 @@ class StarConnectDatabaseService {
 
     // Firestore Sync
     if (this.isFirebaseReady && this.db) {
-      setDoc(doc(this.db, 'users', uid), newUser).catch(console.warn);
+      setDoc(doc(this.db, 'users', uid), this.cleanForFirestore(newUser)).catch(console.warn);
     }
 
     return { success: true, user: newUser };
@@ -456,7 +650,7 @@ class StarConnectDatabaseService {
 
     // Sync to Firestore Users collection
     if (this.isFirebaseReady && this.db) {
-      setDoc(doc(this.db, 'users', user.id), user).catch(console.warn);
+      setDoc(doc(this.db, 'users', user.id), this.cleanForFirestore(user)).catch(console.warn);
     }
 
     return { success: true, user };
@@ -501,7 +695,7 @@ class StarConnectDatabaseService {
 
     // Firestore Sync
     if (this.isFirebaseReady && this.db) {
-      setDoc(doc(this.db, 'users', uid), newUser).catch(console.warn);
+      setDoc(doc(this.db, 'users', uid), this.cleanForFirestore(newUser)).catch(console.warn);
     }
 
     return newUser;
@@ -532,7 +726,7 @@ class StarConnectDatabaseService {
     window.dispatchEvent(new CustomEvent('starconnect_db_update'));
 
     if (this.isFirebaseReady && this.db) {
-      setDoc(doc(this.db, 'users', user.id), user).catch(console.warn);
+      setDoc(doc(this.db, 'users', user.id), this.cleanForFirestore(user)).catch(console.warn);
     }
 
     return user;
@@ -577,7 +771,7 @@ class StarConnectDatabaseService {
     this.addNotification('user_admin', user.id, user.name, user.avatarUrl, 'kyc_update', `ক্রিয়েটর ভেরিফিকেশন (KYC) এর জন্য রিকোয়েস্ট জমা দিয়েছেন। NID: ${idNum}`);
 
     if (this.isFirebaseReady && this.db) {
-      setDoc(doc(this.db, 'users', user.id), user).catch(console.warn);
+      setDoc(doc(this.db, 'users', user.id), this.cleanForFirestore(user)).catch(console.warn);
     }
 
     return user;
@@ -616,6 +810,22 @@ class StarConnectDatabaseService {
     const idxTarget = this.cache.users.findIndex(u => u.id === target.id);
     if (idxTarget !== -1) this.cache.users[idxTarget] = { ...target };
 
+    // Update Firestore if available
+    if (this.isFirebaseReady && this.db) {
+      setDoc(doc(this.db, 'users', me.id), this.cleanForFirestore(me)).catch(console.warn);
+      setDoc(doc(this.db, 'users', target.id), this.cleanForFirestore(target)).catch(console.warn);
+
+      if (!followExists) {
+        setDoc(doc(this.db, 'follows', followKey), this.cleanForFirestore({
+          id: followKey,
+          followerId: me.id,
+          followingId: target.id
+        })).catch(console.warn);
+      } else {
+        deleteDoc(doc(this.db, 'follows', followKey)).catch(console.warn);
+      }
+    }
+
     this.sync();
     window.dispatchEvent(new CustomEvent('starconnect_db_update'));
     return { isFollowing: !followExists, targetUser: target };
@@ -625,6 +835,216 @@ class StarConnectDatabaseService {
     const me = this.cache.currentUser;
     if (!me) return false;
     return localStorage.getItem(`follow_${me.id}_${targetUserId}`) === 'true';
+  }
+
+  // --- Friend Requests & Friends ---
+  getFriendRequests(): FriendRequest[] {
+    const me = this.getCurrentUser();
+    if (!me) return [];
+    return this.cache.friendRequests.filter(fr => fr.senderId === me.id || fr.receiverId === me.id);
+  }
+
+  sendFriendRequest(targetUserId: string): FriendRequest | null {
+    const me = this.getCurrentUser();
+    if (!me || me.id === targetUserId) return null;
+
+    // Check if request already exists
+    const existing = this.cache.friendRequests.find(fr => 
+      (fr.senderId === me.id && fr.receiverId === targetUserId) ||
+      (fr.senderId === targetUserId && fr.receiverId === me.id)
+    );
+    if (existing) return existing;
+
+    const frId = `fr_${Date.now()}_${Math.floor(Math.random() * 1000)}`;
+    const newFr: FriendRequest = {
+      id: frId,
+      senderId: me.id,
+      senderName: me.name,
+      senderAvatarUrl: me.avatarUrl,
+      receiverId: targetUserId,
+      status: 'pending',
+      createdAt: new Date().toISOString()
+    };
+
+    this.cache.friendRequests.push(newFr);
+
+    if (this.isFirebaseReady && this.db) {
+      setDoc(doc(this.db, 'friend_requests', frId), this.cleanForFirestore(newFr)).catch(console.warn);
+    }
+
+    // Add notification for receiver
+    this.addNotification(
+      targetUserId,
+      me.id,
+      me.name,
+      me.avatarUrl,
+      'friend_request',
+      `${me.name} আপনাকে একটি ফ্রেন্ড রিকোয়েস্ট পাঠিয়েছেন।`
+    );
+
+    this.sync();
+    window.dispatchEvent(new CustomEvent('starconnect_db_update'));
+    return newFr;
+  }
+
+  acceptFriendRequest(requestId: string): boolean {
+    const me = this.getCurrentUser();
+    if (!me) return false;
+
+    const idx = this.cache.friendRequests.findIndex(fr => fr.id === requestId);
+    if (idx === -1) return false;
+
+    const fr = this.cache.friendRequests[idx];
+    if (fr.receiverId !== me.id) return false; // only receiver can accept
+
+    fr.status = 'accepted';
+    this.cache.friendRequests[idx] = fr;
+
+    if (this.isFirebaseReady && this.db) {
+      setDoc(doc(this.db, 'friend_requests', requestId), this.cleanForFirestore(fr)).catch(console.warn);
+    }
+
+    // Trigger mutual follows for convenience
+    const senderId = fr.senderId;
+    this.forceFollow(me.id, senderId);
+    this.forceFollow(senderId, me.id);
+
+    // Friend acceptance notification
+    this.addNotification(
+      senderId,
+      me.id,
+      me.name,
+      me.avatarUrl,
+      'friend_accept',
+      `${me.name} আপনার ফ্রেন্ড রিকোয়েস্ট গ্রহণ করেছেন।`
+    );
+
+    this.sync();
+    window.dispatchEvent(new CustomEvent('starconnect_db_update'));
+    return true;
+  }
+
+  cancelFriendRequest(requestId: string): boolean {
+    const me = this.getCurrentUser();
+    if (!me) return false;
+
+    const idx = this.cache.friendRequests.findIndex(fr => fr.id === requestId);
+    if (idx === -1) return false;
+
+    const fr = this.cache.friendRequests[idx];
+    this.cache.friendRequests.splice(idx, 1);
+
+    if (this.isFirebaseReady && this.db) {
+      deleteDoc(doc(this.db, 'friend_requests', requestId)).catch(console.warn);
+    }
+
+    this.sync();
+    window.dispatchEvent(new CustomEvent('starconnect_db_update'));
+    return true;
+  }
+
+  unfriend(targetUserId: string): boolean {
+    const me = this.getCurrentUser();
+    if (!me) return false;
+
+    // Filter out friend requests between us
+    this.cache.friendRequests = this.cache.friendRequests.filter(fr => {
+      const isMatch = (fr.senderId === me.id && fr.receiverId === targetUserId) ||
+                      (fr.senderId === targetUserId && fr.receiverId === me.id);
+      if (isMatch && this.isFirebaseReady && this.db) {
+        deleteDoc(doc(this.db, 'friend_requests', fr.id)).catch(console.warn);
+      }
+      return !isMatch;
+    });
+
+    // Remove follow relationship
+    const followKey1 = `follow_${me.id}_${targetUserId}`;
+    if (localStorage.getItem(followKey1) === 'true') {
+      localStorage.setItem(followKey1, 'false');
+      me.followingCount = Math.max(0, me.followingCount - 1);
+      const target = this.getUserById(targetUserId);
+      if (target) {
+        target.followersCount = Math.max(0, target.followersCount - 1);
+        const idxT = this.cache.users.findIndex(u => u.id === targetUserId);
+        if (idxT !== -1) this.cache.users[idxT] = { ...target };
+        if (this.isFirebaseReady && this.db) {
+          setDoc(doc(this.db, 'users', targetUserId), this.cleanForFirestore(target)).catch(console.warn);
+        }
+      }
+      if (this.isFirebaseReady && this.db) {
+        deleteDoc(doc(this.db, 'follows', followKey1)).catch(console.warn);
+      }
+    }
+
+    const followKey2 = `follow_${targetUserId}_${me.id}`;
+    if (localStorage.getItem(followKey2) === 'true') {
+      localStorage.setItem(followKey2, 'false');
+      me.followersCount = Math.max(0, me.followersCount - 1);
+      const target = this.getUserById(targetUserId);
+      if (target) {
+        target.followingCount = Math.max(0, target.followingCount - 1);
+        const idxT = this.cache.users.findIndex(u => u.id === targetUserId);
+        if (idxT !== -1) this.cache.users[idxT] = { ...target };
+        if (this.isFirebaseReady && this.db) {
+          setDoc(doc(this.db, 'users', targetUserId), this.cleanForFirestore(target)).catch(console.warn);
+        }
+      }
+      if (this.isFirebaseReady && this.db) {
+        deleteDoc(doc(this.db, 'follows', followKey2)).catch(console.warn);
+      }
+    }
+
+    this.cache.currentUser = { ...me };
+    const idxMe = this.cache.users.findIndex(u => u.id === me.id);
+    if (idxMe !== -1) this.cache.users[idxMe] = { ...me };
+
+    if (this.isFirebaseReady && this.db) {
+      setDoc(doc(this.db, 'users', me.id), this.cleanForFirestore(me)).catch(console.warn);
+    }
+
+    this.sync();
+    window.dispatchEvent(new CustomEvent('starconnect_db_update'));
+    return true;
+  }
+
+  forceFollow(followerId: string, followingId: string) {
+    const follower = this.getUserById(followerId);
+    const following = this.getUserById(followingId);
+    if (!follower || !following) return;
+
+    const followKey = `follow_${followerId}_${followingId}`;
+    const followExists = localStorage.getItem(followKey) === 'true';
+
+    if (!followExists) {
+      localStorage.setItem(followKey, 'true');
+      follower.followingCount++;
+      following.followersCount++;
+
+      const idxF = this.cache.users.findIndex(u => u.id === followerId);
+      if (idxF !== -1) {
+        this.cache.users[idxF] = { ...follower };
+      }
+      const idxFl = this.cache.users.findIndex(u => u.id === followingId);
+      if (idxFl !== -1) {
+        this.cache.users[idxFl] = { ...following };
+      }
+
+      if (this.cache.currentUser && this.cache.currentUser.id === followerId) {
+        this.cache.currentUser = { ...follower };
+      } else if (this.cache.currentUser && this.cache.currentUser.id === followingId) {
+        this.cache.currentUser = { ...following };
+      }
+
+      if (this.isFirebaseReady && this.db) {
+        setDoc(doc(this.db, 'users', followerId), this.cleanForFirestore(follower)).catch(console.warn);
+        setDoc(doc(this.db, 'users', followingId), this.cleanForFirestore(following)).catch(console.warn);
+        setDoc(doc(this.db, 'follows', followKey), this.cleanForFirestore({
+          id: followKey,
+          followerId,
+          followingId
+        })).catch(console.warn);
+      }
+    }
   }
 
   // --- Post Functions ---
@@ -703,7 +1123,7 @@ class StarConnectDatabaseService {
     });
 
     if (this.isFirebaseReady && this.db) {
-      setDoc(doc(this.db, 'posts', postId), newPost).catch(console.warn);
+      setDoc(doc(this.db, 'posts', postId), this.cleanForFirestore(newPost)).catch(console.warn);
     }
 
     window.dispatchEvent(new CustomEvent('starconnect_db_update'));
@@ -765,9 +1185,9 @@ class StarConnectDatabaseService {
     this.sync();
 
     if (this.isFirebaseReady && this.db) {
-      setDoc(doc(this.db, 'posts', postId, 'comments', cid), newComment).catch(console.warn);
+      setDoc(doc(this.db, 'posts', postId, 'comments', cid), this.cleanForFirestore(newComment)).catch(console.warn);
       if (updatedPost) {
-        setDoc(doc(this.db, 'posts', postId), updatedPost).catch(console.warn);
+        setDoc(doc(this.db, 'posts', postId), this.cleanForFirestore(updatedPost)).catch(console.warn);
       }
     }
 
@@ -867,7 +1287,7 @@ class StarConnectDatabaseService {
           );
 
           if (this.isFirebaseReady && this.db) {
-            setDoc(doc(this.db, 'users', referrer.id), referrer).catch(console.warn);
+            setDoc(doc(this.db, 'users', referrer.id), this.cleanForFirestore(referrer)).catch(console.warn);
           }
         }
       }
@@ -1009,6 +1429,11 @@ class StarConnectDatabaseService {
       starGiftAmount
     };
 
+    // Save to Firestore if available
+    if (this.isFirebaseReady && this.db) {
+      setDoc(doc(this.db, 'messages', msgId), this.cleanForFirestore(newMsg)).catch(console.warn);
+    }
+
     this.cache.messages.push(newMsg);
 
     // Update chat index
@@ -1069,6 +1494,11 @@ class StarConnectDatabaseService {
       mediaType: 'text'
     };
 
+    // Save to Firestore if available
+    if (this.isFirebaseReady && this.db) {
+      setDoc(doc(this.db, 'messages', msgId), this.cleanForFirestore(replyMsg)).catch(console.warn);
+    }
+
     this.cache.messages.push(replyMsg);
 
     const chatIdx = this.cache.chats.findIndex(c => c.id === chatId);
@@ -1093,7 +1523,11 @@ class StarConnectDatabaseService {
     // Set messages to isRead: true for messages sent by the partner
     this.cache.messages = this.cache.messages.map(m => {
       if (m.chatId === chatId && m.receiverId === me.id) {
-        return { ...m, isRead: true };
+        const updated = { ...m, isRead: true };
+        if (this.isFirebaseReady && this.db) {
+          setDoc(doc(this.db, 'messages', m.id), this.cleanForFirestore(updated)).catch(console.warn);
+        }
+        return updated;
       }
       return m;
     });

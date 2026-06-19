@@ -227,6 +227,7 @@ export default function FeedView({ onNavigate, onUserSelect, onMessageUser }: Fe
     dbService.addComment(activeCommentsPost.id, newCommentText);
     setCommentsList(dbService.getComments(activeCommentsPost.id));
     setNewCommentText('');
+    setActiveCommentsPost(null);
     loadFeedData();
   };
 
@@ -602,6 +603,7 @@ export default function FeedView({ onNavigate, onUserSelect, onMessageUser }: Fe
             const isLiked = post.likedBy?.includes(myProfile.id);
             const isAuthor = post.authorId === myProfile.id;
             const isUnlocked = post.unlockedByUserIds?.includes(myProfile.id) || isAuthor || !post.isPremiumPost;
+            const postComments = dbService.getComments(post.id);
 
             return (
               <div
@@ -758,6 +760,21 @@ export default function FeedView({ onNavigate, onUserSelect, onMessageUser }: Fe
                     <Share2 className="w-4 h-4" />
                   </button>
                 </div>
+
+                {/* মন্তব্যের লাইভ প্রিভিউ সেকশন */}
+                {postComments.length > 0 && (
+                  <div className="mt-2.5 p-3 rounded-2xl bg-zinc-50 dark:bg-neutral-950 border border-neutral-100/40 dark:border-neutral-850 text-left space-y-1.5">
+                    <span className="text-[9px] font-black text-neutral-400 dark:text-neutral-500 uppercase tracking-wider block font-mono">মন্তব্য প্রিভিউ (Recent Comments)</span>
+                    <div className="space-y-1">
+                      {postComments.slice(-2).map((cmt) => (
+                        <div key={cmt.id} className="text-[11.5px] leading-relaxed flex items-start gap-1 text-slate-700 dark:text-neutral-350">
+                          <span className="font-extrabold text-slate-850 dark:text-neutral-200 shrink-0">{cmt.authorName}:</span>
+                          <span className="font-medium pr-1">{cmt.content}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
 
               </div>
             );
